@@ -1828,15 +1828,29 @@ async function getAnimeInWebEpisode(animeId, episodeNumber) {
 
 // Ambil jadwal anime per hari dari animeinweb.com - OPTIMASI MAKSIMAL: disable resources, kurangi wait
 async function getSchedule(day = null) {
-  // Check if we can use playwright
+  // Check if we can use playwright or puppeteer
   let usePlaywright = false;
+  let usePuppeteer = false;
+  
   try {
     require.resolve('playwright');
     if (!process.env.VERCEL) usePlaywright = true;
   } catch (e) {}
+  
+  // Untuk Vercel, pakai Puppeteer dengan @sparticuz/chromium
+  if (process.env.VERCEL) {
+    try {
+      require.resolve('puppeteer-core');
+      require.resolve('@sparticuz/chromium');
+      usePuppeteer = true;
+      console.log('Using Puppeteer with @sparticuz/chromium for Vercel...');
+    } catch (e) {
+      console.log('Puppeteer not available on Vercel, using API fallback...');
+    }
+  }
 
-  if (!usePlaywright) {
-    console.log('Playwright not available or on Vercel, using API fallback...');
+  if (!usePlaywright && !usePuppeteer) {
+    console.log('No browser automation available, using API fallback...');
     // Langsung pakai API explore karena HTML schedule pakai Next.js (client-side rendering)
     try {
       const data = { currentDay: day || 'HARI INI', schedule: [] };
@@ -1962,9 +1976,217 @@ async function getSchedule(day = null) {
     }
   }
 
-  try {
-    const { chromium } = require('playwright');
-    const browser = await chromium.launch({ 
+  // Gunakan Puppeteer untuk Vercel
+  if (usePuppeteer) {
+    try {
+      const puppeteer = require('puppeteer-core');
+      const chromium = require('@sparticuz/chromium');
+      
+      console.log('Launching Puppeteer with @sparticuz/chromium...');
+      const browser = await puppeteer.launch({
+        args: chromium.args,
+        defaultViewport: chromium.defaultViewport,
+        executablePath: await chromium.executablePath(),
+        headless: chromium.headless,
+        ignoreHTTPSErrors: true,
+      });
+      
+      const page = await browser.newPage();
+      
+      // Block images, CSS, fonts untuk lebih cepat
+      await page.setRequestInterception(true);
+      page.on('request', (req) => {
+        const resourceType = req.resourceType();
+        if (['image', 'stylesheet', 'font'].includes(resourceType)) {
+          req.abort();
+        } else {
+          req.continue();
+        }
+      });
+      
+      await page.goto(`${ANIMEINWEB_URL}/schedule`, { waitUntil: 'domcontentloaded', timeout: 10000 });
+      
+      // Jika day diberikan, klik tab hari tersebut
+      if (day) {
+        const dayMap = {
+          'senin': 'SEN', 'monday': 'SEN',
+          'selasa': 'SEL', 'tuesday': 'SEL',
+          'rabu': 'RAB', 'wednesday': 'RAB',
+          'kamis': 'KAM', 'thursday': 'KAM',
+          'jumat': 'JUM', 'friday': 'JUM',
+          'sabtu': 'SAB', 'saturday': 'SAB',
+          'minggu': 'MIN', 'sunday': 'MIN',
+          'random': 'RANDOM'
+        };
+        
+        const dayTab = dayMap[day.toLowerCase()] || day.toUpperCase();
+        try {
+          await page.click(`button:has-text("${dayTab}")`, { timeout: 1000 });
+          await page.waitForTimeout(300);
+        } catch (e) {
+          console.log(`Tab ${dayTab} tidak ditemukan, menggunakan default`);
+        }
+      }
+      
+      const scheduleData = await page.evaluate(() => {
+        const data = {
+          currentDay: '',
+          schedule: []
+        };
+        
+        // Extract current active tab
+        const activeTab = document.querySelector('[role="tab"][aria-selected="true"]');
+        if (activeTab) {
+          data.currentDay = activeTab.textContent.trim();
+        }
+        
+        // Extract semua anime dari schedule (sama seperti Playwright version)
+        const animeLinks = document.querySelectorAll('a[href*="/anime/"]');
+        animeLinks.forEach(link => {
+          const href = link.href;
+          const text = link.textContent.trim();
+          
+          // Extract image
+          let thumbnail = '';
+          let cover = '';
+          let poster = '';
+          const img = link.querySelector('img');
+          if (img) {
+            thumbnail = img.src || img.getAttribute('data-src') || img.getAttribute('data-lazy-src') || '';
+            cover = thumbnail;
+            poster = thumbnail;
+          } else {
+            const parent = link.closest('div, article, section, li');
+            if (parent) {
+              const parentImg = parent.querySelector('img');
+              if (parentImg) {
+                thumbnail = parentImg.src || parentImg.getAttribute('data-src') || '';
+                cover = thumbnail;
+                poster = thumbnail;
+              }
+            }
+          }
+          
+          // Extract data (sama seperti Playwright version)
+          let genre = '';
+          let views = '';
+          let favorite = '';
+          let time = '';
+          let title = '';
+          
+          const viewMatch = text.match(/([\d.]+)\s*view/i);
+          const favMatch = text.match(/([\d.]+)\s*favorite/i);
+          const timeMatch = text.match(/(\d+[hj]\s*\d+[jm]|\d+[hj]|\d+[jm]|tunda|tamat|new\s*!!)/i);
+          
+          if (viewMatch) views = viewMatch[1];
+          if (favMatch) favorite = favMatch[1];
+          if (timeMatch) time = timeMatch[0];
+          
+          let cleanText = text;
+          cleanText = cleanText.replace(/[\d.]+?\s*views?/gi, '');
+          cleanText = cleanText.replace(/[\d.]+?\s*favorites?/gi, '');
+          cleanText = cleanText.replace(/\d+[hj]\s*\d+[jm]|\d+[hj]|\d+[jm]|tunda|tamat|new\s*!!/gi, '');
+          cleanText = cleanText.replace(/\s+[\d.]+\s*$/g, '');
+          
+          const genrePattern = /^(Action|Comedy|Drama|Fantasy|Adventure|Seinen|Game|Historical|Romance|Sci-Fi|Slice of Life|Sports|Supernatural|Thriller|Horror|Mystery|Music|School|Shounen|Shoujo|Ecchi|Harem|Mecha|Military|Parody|Samurai|Space|Super Power|Vampire|Yaoi|Yuri)/i;
+          const genreMatchResult = cleanText.match(genrePattern);
+          if (genreMatchResult) {
+            genre = genreMatchResult[1];
+            cleanText = cleanText.replace(new RegExp(genre, 'gi'), '').trim();
+          }
+          
+          cleanText = cleanText.replace(/\s+/g, ' ').trim();
+          cleanText = cleanText.replace(/[^\w\s\-:()]/g, '').trim();
+          title = cleanText.trim();
+          
+          if (!title || title.length < 3) {
+            const titleMatch = text.match(/^([A-Za-z\s\-:()]+?)(?:\s*[\d.]|view|favorite|new|tunda|tamat)/i);
+            if (titleMatch) {
+              title = titleMatch[1].trim();
+            } else {
+              const parts = text.split(/\d/);
+              title = parts[0].trim();
+            }
+          }
+          
+          if (genre && title.toLowerCase().includes(genre.toLowerCase())) {
+            title = title.replace(new RegExp(genre, 'gi'), '').trim();
+          }
+          
+          const idMatch = href.match(/\/anime\/(\d+)/);
+          const animeId = idMatch ? idMatch[1] : null;
+          
+          if (animeId && title) {
+            data.schedule.push({
+              animeId: animeId,
+              title: title.toLowerCase(),
+              genre: genre.toLowerCase() || null,
+              views: views || '0',
+              favorite: favorite || '0',
+              releaseTime: time.toLowerCase() || null,
+              link: href,
+              thumbnail: thumbnail || '',
+              cover: cover || '',
+              poster: poster || '',
+              isNew: text.includes('new !!') || text.toLowerCase().includes('new'),
+              status: text.includes('tamat') ? 'finished' : text.includes('tunda') ? 'on hold' : 'ongoing'
+            });
+          }
+        });
+        
+        return data;
+      });
+      
+      await browser.close();
+      
+      // Fetch cover/poster dari API untuk anime yang tidak punya image
+      const animeWithoutImage = scheduleData.schedule.filter(a => !a.thumbnail && !a.cover && !a.poster).slice(0, 20);
+      if (animeWithoutImage.length > 0) {
+        console.log(`Fetching cover/poster untuk ${animeWithoutImage.length} anime...`);
+        const imagePromises = animeWithoutImage.map(async (anime) => {
+          try {
+            const detailUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/movie/detail/${anime.animeId}`;
+            const detailResponse = await axios.get(detailUrl, { timeout: 5000 });
+            if (detailResponse.data && detailResponse.data.data && detailResponse.data.data.movie) {
+              const movie = detailResponse.data.data.movie;
+              return {
+                animeId: anime.animeId,
+                cover: movie.image_cover || '',
+                poster: movie.image_poster || '',
+                thumbnail: movie.image_cover || movie.image_poster || ''
+              };
+            }
+          } catch (error) {
+            console.log(`Failed to fetch image for anime ${anime.animeId}:`, error.message);
+          }
+          return null;
+        });
+        
+        const imageResults = await Promise.all(imagePromises);
+        imageResults.forEach(result => {
+          if (result) {
+            const scheduleItem = scheduleData.schedule.find(a => a.animeId === result.animeId);
+            if (scheduleItem) {
+              scheduleItem.cover = result.cover;
+              scheduleItem.poster = result.poster;
+              scheduleItem.thumbnail = result.thumbnail;
+            }
+          }
+        });
+      }
+      
+      return scheduleData;
+    } catch (error) {
+      console.error('Error fetching schedule with Puppeteer:', error);
+      throw error;
+    }
+  }
+
+  // Gunakan Playwright untuk local development
+  if (usePlaywright) {
+    try {
+      const { chromium } = require('playwright');
+      const browser = await chromium.launch({ 
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
     });
@@ -2201,10 +2423,14 @@ async function getSchedule(day = null) {
     }
     
     return scheduleData;
-  } catch (error) {
-    console.error('Error fetching schedule:', error);
-    throw error;
+    } catch (error) {
+      console.error('Error fetching schedule:', error);
+      throw error;
+    }
   }
+  
+  // Jika sampai sini berarti tidak ada browser automation yang tersedia
+  throw new Error('Browser automation tidak tersedia. Schedule hanya tersedia dengan Playwright atau Puppeteer.');
 }
 
 // Ambil anime trending/popular dari homepage - menggunakan API internal untuk lebih cepat
