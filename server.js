@@ -1058,22 +1058,26 @@ app.get('/api/v1/episode/', handleEndpoint(async (req, res) => {
 }));
 
 // Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-  console.log(`📚 Base URL: http://localhost:${PORT}/api/v1/`);
-  console.log(`\n📖 Endpoints:`);
-  console.log(`   GET /api/v1/latest - Episode terbaru`);
-  console.log(`   GET /api/v1/detail?slug=... - Detail anime`);
-  console.log(`   GET /api/v1/search?q=... - Pencarian anime`);
-  console.log(`   GET /api/v1/list?page=1 - List anime`);
-  console.log(`   GET /api/v1/episode?url=... - Video episode`);
-  console.log(`   GET /api/v1/animeinweb?id=... - Info anime dari animeinweb.com`);
-  console.log(`   GET /api/v1/animeinweb/episode?animeId=...&episodeNumber=... - Video episode animeinweb`);
-  console.log(`   GET /api/v1/animeinweb/schedule?day=... - Jadwal anime (day: senin/selasa/rabu/kamis/jumat/sabtu/minggu/random)`);
-  console.log(`   GET /api/v1/animeinweb/trending - Anime sedang hangat/popular`);
-  console.log(`   GET /api/v1/animeinweb/new - Anime baru ditambahkan`);
-  console.log(`   GET /api/v1/animeinweb/today - Anime hari ini`);
-  console.log(`   GET /api/v1/download/episode?animeId=...&episodeNumber=...&resolution=... - Download link per episode`);
-  console.log(`   GET /api/v1/download/batch?animeId=...&resolution=...&startEpisode=...&endEpisode=... - Download link batch\n`);
-});
+if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
+    console.log(`📚 Base URL: http://localhost:${PORT}/api/v1/`);
+    console.log(`\n📖 Endpoints:`);
+    console.log(`   GET /api/v1/latest - Episode terbaru`);
+    console.log(`   GET /api/v1/detail?slug=... - Detail anime`);
+    console.log(`   GET /api/v1/search?q=... - Pencarian anime`);
+    console.log(`   GET /api/v1/list?page=1 - List anime`);
+    console.log(`   GET /api/v1/episode?url=... - Video episode`);
+    console.log(`   GET /api/v1/animeinweb?id=... - Info anime dari animeinweb.com`);
+    console.log(`   GET /api/v1/animeinweb/episode?animeId=...&episodeNumber=... - Video episode animeinweb`);
+    console.log(`   GET /api/v1/animeinweb/schedule?day=... - Jadwal anime (day: senin/selasa/rabu/kamis/jumat/sabtu/minggu/random)`);
+    console.log(`   GET /api/v1/animeinweb/trending - Anime sedang hangat/popular`);
+    console.log(`   GET /api/v1/animeinweb/new - Anime baru ditambahkan`);
+    console.log(`   GET /api/v1/animeinweb/today - Anime hari ini`);
+    console.log(`   GET /api/v1/download/episode?animeId=...&episodeNumber=...&resolution=... - Download link per episode`);
+    console.log(`   GET /api/v1/download/batch?animeId=...&resolution=...&startEpisode=...&endEpisode=... - Download link batch\n`);
+  });
+}
+
+module.exports = app;
 

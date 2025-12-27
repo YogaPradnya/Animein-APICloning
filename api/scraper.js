@@ -6,19 +6,25 @@ const helpers = require('./scraper_helpers');
 const BASE_URL = 'https://s7.nontonanimeid.boats';
 const ANIMEINWEB_URL = 'https://animeinweb.com';
 
-// Fungsi untuk scrape dengan Playwright (untuk website yang pakai JS rendering)
+// Fungsi untuk scrape dengan Playwright (hanya fallback jika benar-benar butuh)
 async function scrapeWithPlaywright(url) {
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
-  
+  // DI VERCEL: Gunakan axios sebagai pengganti karena playwright terlalu berat
+  if (process.env.VERCEL) {
+    console.log('Vercel detected, using Axios instead of Playwright for:', url);
+    return scrapeWithAxios(url);
+  }
+
   try {
-    await page.goto(url, { waitUntil: 'networkidle' });
+    const { chromium } = require('playwright');
+    const browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     const content = await page.content();
     await browser.close();
     return cheerio.load(content);
   } catch (error) {
-    await browser.close();
-    throw error;
+    console.log('Playwright failed, falling back to Axios:', error.message);
+    return scrapeWithAxios(url);
   }
 }
 
@@ -1818,7 +1824,40 @@ async function getAnimeInWebEpisode(animeId, episodeNumber) {
 
 // Ambil jadwal anime per hari dari animeinweb.com - OPTIMASI MAKSIMAL: disable resources, kurangi wait
 async function getSchedule(day = null) {
+  // Check if we can use playwright
+  let usePlaywright = false;
   try {
+    require.resolve('playwright');
+    if (!process.env.VERCEL) usePlaywright = true;
+  } catch (e) {}
+
+  if (!usePlaywright) {
+    console.log('Playwright not available or on Vercel, returning minimal schedule via Axios...');
+    // Fallback: Ambil data statis saja (biasanya hari ini yang muncul pertama)
+    try {
+      const $ = await scrapeWithAxios(`${ANIMEINWEB_URL}/schedule`);
+      const data = { currentDay: day || 'HARI INI', schedule: [] };
+      
+      $('a[href*="/anime/"]').each((i, el) => {
+        const href = $(el).attr('href');
+        const text = $(el).text().trim();
+        const idMatch = href.match(/\/anime\/(\d+)/);
+        if (idMatch && text) {
+          data.schedule.push({
+            animeId: idMatch[1],
+            title: text.toLowerCase(),
+            link: href.startsWith('http') ? href : ANIMEINWEB_URL + href
+          });
+        }
+      });
+      return data;
+    } catch (e) {
+      return { currentDay: 'ERROR', schedule: [] };
+    }
+  }
+
+  try {
+    const { chromium } = require('playwright');
     const browser = await chromium.launch({ 
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
