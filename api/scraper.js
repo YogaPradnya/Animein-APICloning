@@ -1832,27 +1832,154 @@ async function getSchedule(day = null) {
   } catch (e) {}
 
   if (!usePlaywright) {
-    console.log('Playwright not available or on Vercel, returning minimal schedule via Axios...');
-    // Fallback: Ambil data statis saja (biasanya hari ini yang muncul pertama)
+    console.log('Playwright not available or on Vercel, using enhanced Axios fallback...');
+    // Fallback: Parsing HTML dengan Cheerio yang lebih lengkap
     try {
       const $ = await scrapeWithAxios(`${ANIMEINWEB_URL}/schedule`);
       const data = { currentDay: day || 'HARI INI', schedule: [] };
+      const seenIds = new Set();
       
+      // Cari semua link anime dengan parsing yang lebih lengkap
       $('a[href*="/anime/"]').each((i, el) => {
-        const href = $(el).attr('href');
-        const text = $(el).text().trim();
+        const $el = $(el);
+        const href = $el.attr('href');
+        const text = $el.text().trim();
         const idMatch = href.match(/\/anime\/(\d+)/);
-        if (idMatch && text) {
+        
+        if (!idMatch) return;
+        const animeId = idMatch[1];
+        if (seenIds.has(animeId)) return;
+        seenIds.add(animeId);
+        
+        // Extract image
+        let thumbnail = '';
+        let cover = '';
+        let poster = '';
+        const img = $el.find('img').first();
+        if (img.length) {
+          thumbnail = img.attr('src') || img.attr('data-src') || img.attr('data-lazy-src') || '';
+          cover = thumbnail;
+          poster = thumbnail;
+        } else {
+          const parent = $el.closest('div, article, section, li');
+          if (parent.length) {
+            const parentImg = parent.find('img').first();
+            if (parentImg.length) {
+              thumbnail = parentImg.attr('src') || parentImg.attr('data-src') || '';
+              cover = thumbnail;
+              poster = thumbnail;
+            }
+          }
+        }
+        
+        // Parse text untuk extract data (sama seperti versi playwright)
+        let genre = '';
+        let views = '';
+        let favorite = '';
+        let time = '';
+        let title = '';
+        
+        const viewMatch = text.match(/([\d.]+)\s*view/i);
+        const favMatch = text.match(/([\d.]+)\s*favorite/i);
+        const timeMatch = text.match(/(\d+[hj]\s*\d+[jm]|\d+[hj]|\d+[jm]|tunda|tamat|new\s*!!)/i);
+        
+        if (viewMatch) views = viewMatch[1];
+        if (favMatch) favorite = favMatch[1];
+        if (timeMatch) time = timeMatch[0];
+        
+        // Clean title
+        let cleanText = text;
+        cleanText = cleanText.replace(/[\d.]+?\s*views?/gi, '');
+        cleanText = cleanText.replace(/[\d.]+?\s*favorites?/gi, '');
+        cleanText = cleanText.replace(/[\d.]+views?/gi, '');
+        cleanText = cleanText.replace(/[\d.]+favorites?/gi, '');
+        cleanText = cleanText.replace(/\d+[hj]\s*\d+[jm]|\d+[hj]|\d+[jm]|tunda|tamat|new\s*!!/gi, '');
+        cleanText = cleanText.replace(/\s+[\d.]+\s*$/g, '');
+        
+        // Extract genre
+        const genrePattern = /^(Action|Comedy|Drama|Fantasy|Adventure|Seinen|Game|Historical|Romance|Sci-Fi|Slice of Life|Sports|Supernatural|Thriller|Horror|Mystery|Music|School|Shounen|Shoujo|Ecchi|Harem|Mecha|Military|Parody|Samurai|Space|Super Power|Vampire|Yaoi|Yuri)/i;
+        const genreMatchResult = cleanText.match(genrePattern);
+        if (genreMatchResult) {
+          genre = genreMatchResult[1];
+          cleanText = cleanText.replace(new RegExp(genre, 'gi'), '').trim();
+        }
+        
+        cleanText = cleanText.replace(/\s+/g, ' ').trim();
+        cleanText = cleanText.replace(/[^\w\s\-:()]/g, '').trim();
+        title = cleanText.trim();
+        
+        if (!title || title.length < 3) {
+          const titleMatch = text.match(/^([A-Za-z\s\-:()]+?)(?:\s*[\d.]|view|favorite|new|tunda|tamat)/i);
+          if (titleMatch) {
+            title = titleMatch[1].trim();
+          } else {
+            const parts = text.split(/\d/);
+            title = parts[0].trim();
+          }
+        }
+        
+        if (genre && title.toLowerCase().includes(genre.toLowerCase())) {
+          title = title.replace(new RegExp(genre, 'gi'), '').trim();
+        }
+        
+        if (animeId && title && title.length > 2) {
           data.schedule.push({
-            animeId: idMatch[1],
-            title: text.toLowerCase(),
-            link: href.startsWith('http') ? href : ANIMEINWEB_URL + href
+            animeId: animeId,
+            title: title.toLowerCase(),
+            genre: genre.toLowerCase() || null,
+            views: views || '0',
+            favorite: favorite || '0',
+            releaseTime: time.toLowerCase() || null,
+            link: href.startsWith('http') ? href : ANIMEINWEB_URL + href,
+            thumbnail: thumbnail || '',
+            cover: cover || '',
+            poster: poster || '',
+            isNew: text.includes('new !!'),
+            status: text.includes('tamat') ? 'finished' : text.includes('tunda') ? 'on hold' : 'ongoing'
           });
         }
       });
+      
+      // Fetch cover/poster dari API untuk anime yang tidak punya image (batch, max 20)
+      const animeWithoutImage = data.schedule.filter(a => !a.thumbnail && !a.cover && !a.poster).slice(0, 20);
+      if (animeWithoutImage.length > 0) {
+        console.log(`Fetching cover/poster untuk ${animeWithoutImage.length} anime...`);
+        const imagePromises = animeWithoutImage.map(async (anime) => {
+          try {
+            const detailUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/movie/detail/${anime.animeId}`;
+            const detailResponse = await axios.get(detailUrl, { timeout: 5000 });
+            if (detailResponse.data && detailResponse.data.data && detailResponse.data.data.movie) {
+              const movie = detailResponse.data.data.movie;
+              return {
+                animeId: anime.animeId,
+                cover: movie.image_cover || '',
+                poster: movie.image_poster || '',
+                thumbnail: movie.image_cover || movie.image_poster || ''
+              };
+            }
+          } catch (error) {
+            console.log(`Failed to fetch image for anime ${anime.animeId}:`, error.message);
+          }
+          return null;
+        });
+        
+        const imageResults = await Promise.all(imagePromises);
+        imageResults.forEach(result => {
+          if (result) {
+            const scheduleItem = data.schedule.find(a => a.animeId === result.animeId);
+            if (scheduleItem) {
+              scheduleItem.cover = result.cover;
+              scheduleItem.poster = result.poster;
+              scheduleItem.thumbnail = result.thumbnail;
+            }
+          }
+        });
+      }
+      
       return data;
     } catch (e) {
-      return { currentDay: 'ERROR', schedule: [] };
+      console.error('Error in Axios fallback for schedule:', e.message);
+      return { currentDay: day || 'ERROR', schedule: [] };
     }
   }
 
