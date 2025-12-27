@@ -476,13 +476,18 @@ app.get('/docs', (req, res) => {
 
 // Root endpoint
 app.get('/', (req, res) => {
+  // Deteksi protocol dan host secara dinamis
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+  const host = req.headers.host;
+  const fullBaseUrl = `${protocol}://${host}`;
+
   res.json({
     message: 'Anime API - NontonAnimeID & AnimeInWeb',
     status: 'online',
     version: '1.0.0',
-    monitoring: `http://localhost:${PORT}/dashboard`,
-    documentation: `http://localhost:${PORT}/docs`,
-    baseUrl: `http://localhost:${PORT}/api/v1`,
+    monitoring: `${fullBaseUrl}/dashboard`,
+    documentation: `${fullBaseUrl}/docs`,
+    baseUrl: `${fullBaseUrl}/api/v1`,
     author: 'Raisyahah',
     uptime: `${Math.floor((new Date() - stats.startTime) / 1000)}s`
   });
