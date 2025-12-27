@@ -1843,8 +1843,21 @@ async function getSchedule(day = null) {
       const data = { currentDay: day || 'HARI INI', schedule: [] };
       const seenIds = new Set();
       
-      // Cari semua link anime dengan parsing yang lebih lengkap
-      $('a[href*="/anime/"]').each((i, el) => {
+      console.log(`[Schedule] Scraping schedule page, found ${$('a[href*="/anime/"]').length} anime links`);
+      
+      // Cari semua link anime dengan berbagai selector
+      const selectors = [
+        'a[href*="/anime/"]',
+        'a[href^="/anime/"]',
+        '[href*="/anime/"]',
+        'a[href*="anime"]'
+      ];
+      
+      let foundLinks = 0;
+      for (const selector of selectors) {
+        $(selector).each((i, el) => {
+          foundLinks++;
+          if (foundLinks > 200) return false; // Limit untuk menghindari terlalu banyak
         const $el = $(el);
         const href = $el.attr('href');
         const text = $el.text().trim();
@@ -1943,6 +1956,74 @@ async function getSchedule(day = null) {
           });
         }
       });
+      }
+      
+      console.log(`[Schedule] Found ${data.schedule.length} schedule items after parsing`);
+      
+      // Jika masih kosong, coba fetch dari API explore dengan filter day
+      if (data.schedule.length === 0) {
+        console.log(`[Schedule] No items found from HTML, trying API fallback for day: ${day || 'today'}`);
+        try {
+          // Coba fetch dari explore API - ambil semua anime terbaru dan filter berdasarkan day
+          const exploreUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/explore/movie?page=0&sort=update&keyword=`;
+          const exploreResponse = await axios.get(exploreUrl, { timeout: 10000 });
+          
+          if (exploreResponse.data && exploreResponse.data.data && exploreResponse.data.data.movie) {
+            const movies = exploreResponse.data.data.movie;
+            const dayMap = {
+              'senin': 'MONDAY', 'monday': 'MONDAY', 'SEN': 'MONDAY',
+              'selasa': 'TUESDAY', 'tuesday': 'TUESDAY', 'SEL': 'TUESDAY',
+              'rabu': 'WEDNESDAY', 'wednesday': 'WEDNESDAY', 'RAB': 'WEDNESDAY',
+              'kamis': 'THURSDAY', 'thursday': 'THURSDAY', 'KAM': 'THURSDAY',
+              'jumat': 'FRIDAY', 'friday': 'FRIDAY', 'JUM': 'FRIDAY',
+              'sabtu': 'SATURDAY', 'saturday': 'SATURDAY', 'SAB': 'SATURDAY',
+              'minggu': 'SUNDAY', 'sunday': 'SUNDAY', 'MIN': 'SUNDAY',
+              'random': 'RANDOM', 'RANDOM': 'RANDOM'
+            };
+            
+            const targetDay = day ? dayMap[day.toUpperCase()] || day.toUpperCase() : null;
+            
+            // Jika day tidak spesifik, ambil semua anime terbaru (limit 100)
+            const filteredMovies = targetDay 
+              ? movies.filter(m => m.day && m.day.toUpperCase() === targetDay).slice(0, 100)
+              : movies.slice(0, 100);
+            
+            console.log(`[Schedule] Found ${filteredMovies.length} anime from API for day: ${targetDay || 'all'}`);
+            
+            filteredMovies.forEach(movie => {
+              if (!seenIds.has(movie.id)) {
+                seenIds.add(movie.id);
+                const genres = movie.genre ? movie.genre.split(',').map(g => g.trim().toLowerCase()) : [];
+                data.schedule.push({
+                  animeId: movie.id,
+                  title: (movie.title || '').toLowerCase(),
+                  genre: genres[0] || null,
+                  views: movie.views || '0',
+                  favorite: movie.favorites || '0',
+                  releaseTime: null,
+                  link: `${ANIMEINWEB_URL}/anime/${movie.id}`,
+                  thumbnail: movie.image_poster || '',
+                  cover: movie.image_cover || '',
+                  poster: movie.image_poster || '',
+                  isNew: false,
+                  status: (movie.status || '').toLowerCase()
+                });
+              }
+            });
+            
+            // Update currentDay
+            if (day) {
+              const dayNames = {
+                'MONDAY': 'SEN', 'TUESDAY': 'SEL', 'WEDNESDAY': 'RAB',
+                'THURSDAY': 'KAM', 'FRIDAY': 'JUM', 'SATURDAY': 'SAB', 'SUNDAY': 'MIN'
+              };
+              data.currentDay = dayNames[targetDay] || day.toUpperCase();
+            }
+          }
+        } catch (apiError) {
+          console.error(`[Schedule] API fallback failed: ${apiError.message}`);
+        }
+      }
       
       // Fetch cover/poster dari API untuk anime yang tidak punya image (batch, max 20)
       const animeWithoutImage = data.schedule.filter(a => !a.thumbnail && !a.cover && !a.poster).slice(0, 20);
