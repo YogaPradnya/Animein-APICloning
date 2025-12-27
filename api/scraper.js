@@ -329,7 +329,7 @@ async function getAnimeDetail(urlOrSlug) {
 async function searchAnime(keyword) {
   try {
     if (!keyword || keyword.trim().length === 0) {
-      return [];
+      throw new Error('Keyword pencarian tidak boleh kosong');
     }
     
     console.log(`Searching anime dengan keyword: ${keyword}`);
