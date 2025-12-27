@@ -227,7 +227,7 @@ async function getLatestEpisodes() {
     return uniqueEpisodes;
   } catch (error) {
     console.error('Error fetching latest episodes:', error);
-    return [];
+    throw new Error(`Gagal mengambil episode terbaru: ${error.message}`);
   }
 }
 
@@ -342,8 +342,9 @@ async function searchAnime(keyword) {
     const apiData = response.data;
     
     if (!apiData || apiData.error || !apiData.data || !apiData.data.movie) {
-      console.log('No results from API, returning empty array');
-      return [];
+      console.log('No results from API, trying fallback...');
+      // Coba fallback dengan scraping jika API tidak ada hasil
+      throw new Error('Tidak ada hasil dari API, coba lagi atau gunakan keyword yang berbeda');
     }
     
     const movies = apiData.data.movie;
@@ -377,7 +378,7 @@ async function searchAnime(keyword) {
     return results;
   } catch (error) {
     console.error('Error searching anime:', error);
-    return [];
+    throw new Error(`Gagal mencari anime: ${error.message}`);
   }
 }
 
@@ -426,6 +427,9 @@ async function getAnimeList(page = 1) {
       if (animeList.length > 0) break;
     }
 
+    if (animeList.length === 0) {
+      throw new Error('Tidak ada anime ditemukan di halaman ini');
+    }
     return animeList;
   } catch (error) {
     console.error('Error fetching anime list:', error);
@@ -1979,7 +1983,8 @@ async function getSchedule(day = null) {
       return data;
     } catch (e) {
       console.error('Error in Axios fallback for schedule:', e.message);
-      return { currentDay: day || 'ERROR', schedule: [] };
+      // Jangan return empty, coba lagi dengan retry atau throw error
+      throw new Error(`Gagal mengambil data schedule: ${e.message}`);
     }
   }
 

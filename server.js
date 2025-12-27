@@ -493,89 +493,63 @@ app.get('/', (req, res) => {
   });
 });
 
-// Test endpoint dengan mock data (untuk testing frontend)
+// Test endpoint - sekarang return data REAL dari scraper
 app.get('/api/v1/test', handleEndpoint(async (req, res) => {
-  const mockLatestEpisodes = [
-    {
-      title: "one piece",
-      episode: "episode 1000",
-      thumbnail: "https://via.placeholder.com/300x400",
-      link: "https://s7.nontonanimeid.boats/anime/one-piece/episode-1000",
-      resolution: "1080p",
-      releaseDate: "2024-01-15"
-    },
-    {
-      title: "demon slayer",
-      episode: "episode 12",
-      thumbnail: "https://via.placeholder.com/300x400",
-      link: "https://s7.nontonanimeid.boats/anime/demon-slayer/episode-12",
-      resolution: "720p",
-      releaseDate: "2024-01-14"
-    }
-  ];
-
-  const mockSearchResults = [
-    {
-      title: "one piece",
-      thumbnail: "https://via.placeholder.com/300x400",
-      link: "https://s7.nontonanimeid.boats/anime/one-piece",
-      rating: 9.5
-    }
-  ];
-
   const endpoint = req.query.endpoint || 'latest';
 
   try {
     if (endpoint === 'latest') {
-      return res.json({
+      const episodes = await scraper.getLatestEpisodes();
+      return {
         success: true,
-        data: mockLatestEpisodes,
-        total: mockLatestEpisodes.length,
-        note: 'Ini adalah mock data untuk testing. Update selector CSS di scraper.js untuk mendapatkan data real.'
-      });
+        data: episodes,
+        total: episodes.length,
+        note: 'Data real dari scraper'
+      };
     } else if (endpoint === 'search') {
-      return res.json({
+      const query = req.query.q || '';
+      if (!query) {
+        throw new Error('Parameter q (query) diperlukan untuk search');
+      }
+      const results = await scraper.searchAnime(query);
+      return {
         success: true,
-        data: mockSearchResults,
-        total: mockSearchResults.length,
-        query: req.query.q || '',
-        note: 'Ini adalah mock data untuk testing.'
-      });
+        data: results,
+        total: results.length,
+        query: query,
+        note: 'Data real dari scraper'
+      };
     } else {
-      return res.json({
+      return {
         success: true,
-        message: 'Test endpoint',
-        availableEndpoints: ['latest', 'search']
-      });
+        message: 'Test endpoint - semua data adalah REAL',
+        availableEndpoints: ['latest', 'search'],
+        note: 'Gunakan ?endpoint=latest atau ?endpoint=search&q=naruto'
+      };
     }
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    throw new Error(error.message);
   }
 }));
 
 app.get('/api/v1/test/', handleEndpoint(async (req, res) => {
-  // Same handler as above
-  const mockLatestEpisodes = [
-    {
-      title: "one piece",
-      episode: "episode 1000",
-      thumbnail: "https://via.placeholder.com/300x400",
-      link: "https://s7.nontonanimeid.boats/anime/one-piece/episode-1000",
-      resolution: "1080p",
-      releaseDate: "2024-01-15"
-    }
-  ];
-
   const endpoint = req.query.endpoint || 'latest';
-  return res.json({
-    success: true,
-    data: endpoint === 'latest' ? mockLatestEpisodes : [],
-    total: mockLatestEpisodes.length,
-    note: 'Mock data untuk testing'
-  });
+  
+  if (endpoint === 'latest') {
+    const episodes = await scraper.getLatestEpisodes();
+    return {
+      success: true,
+      data: episodes,
+      total: episodes.length,
+      note: 'Data real dari scraper'
+    };
+  } else {
+    return {
+      success: true,
+      message: 'Test endpoint - semua data adalah REAL',
+      availableEndpoints: ['latest', 'search']
+    };
+  }
 }));
 
 // Endpoint untuk episode terbaru (dengan dan tanpa trailing slash)
