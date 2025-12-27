@@ -3,8 +3,9 @@ const cheerio = require('cheerio');
 const { chromium } = require('playwright');
 const helpers = require('./scraper_helpers');
 
-const BASE_URL = 'https://s7.nontonanimeid.boats';
-const ANIMEINWEB_URL = 'https://animeinweb.com';
+// Base URL dari environment variable dengan fallback ke default
+const BASE_URL = process.env.BASE_URL || 'https://s7.nontonanimeid.boats';
+const ANIMEINWEB_URL = process.env.ANIMEINWEB_URL || 'https://animeinweb.com';
 
 // Fungsi untuk scrape dengan Playwright (hanya fallback jika benar-benar butuh)
 async function scrapeWithPlaywright(url) {

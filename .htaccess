@@ -1,0 +1,13 @@
+# Apache configuration untuk shared hosting
+# Jika pakai subdomain, file ini tidak perlu
+# Jika pakai path (domain.com/api), uncomment baris berikut:
+
+# RewriteEngine On
+# RewriteBase /api
+# RewriteRule ^(.*)$ http://localhost:3000/$1 [P,L]
+
+# Catatan: Untuk shared hosting dengan Node.js, biasanya perlu:
+# 1. Setup Node.js app via cPanel Node.js Selector
+# 2. Atau pakai PM2 untuk keep-alive
+# 3. Atau pakai service seperti Passenger (jika tersedia)
+
