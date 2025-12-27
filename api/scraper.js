@@ -1845,19 +1845,8 @@ async function getSchedule(day = null) {
       
       console.log(`[Schedule] Scraping schedule page, found ${$('a[href*="/anime/"]').length} anime links`);
       
-      // Cari semua link anime dengan berbagai selector
-      const selectors = [
-        'a[href*="/anime/"]',
-        'a[href^="/anime/"]',
-        '[href*="/anime/"]',
-        'a[href*="anime"]'
-      ];
-      
-      let foundLinks = 0;
-      for (const selector of selectors) {
-        $(selector).each((i, el) => {
-          foundLinks++;
-          if (foundLinks > 200) return false; // Limit untuk menghindari terlalu banyak
+      // Cari semua link anime dengan parsing yang lebih lengkap
+      $('a[href*="/anime/"]').each((i, el) => {
         const $el = $(el);
         const href = $el.attr('href');
         const text = $el.text().trim();
@@ -1947,16 +1936,15 @@ async function getSchedule(day = null) {
             views: views || '0',
             favorite: favorite || '0',
             releaseTime: time.toLowerCase() || null,
-            link: href.startsWith('http') ? href : ANIMEINWEB_URL + href,
+            link: href.startsWith('http') ? href : (href.startsWith('/') ? ANIMEINWEB_URL + href : `${ANIMEINWEB_URL}/${href}`),
             thumbnail: thumbnail || '',
             cover: cover || '',
             poster: poster || '',
-            isNew: text.includes('new !!'),
+            isNew: text.includes('new !!') || text.toLowerCase().includes('new'),
             status: text.includes('tamat') ? 'finished' : text.includes('tunda') ? 'on hold' : 'ongoing'
           });
         }
       });
-      }
       
       console.log(`[Schedule] Found ${data.schedule.length} schedule items after parsing`);
       
