@@ -1842,64 +1842,116 @@ async function getSchedule(day = null) {
     } catch (e) {}
   }
 
-  // Untuk Vercel atau jika Playwright tidak tersedia: pakai API internal
+  // Untuk Vercel atau jika Playwright tidak tersedia: pakai API internal schedule
   if (isVercel || !usePlaywright) {
-    console.log('[Schedule] Using API internal (Vercel/no Playwright)...');
-    // Langsung pakai API explore karena HTML schedule pakai Next.js (client-side rendering)
-    try {
-      const data = { currentDay: day || 'HARI INI', schedule: [] };
-      const seenIds = new Set();
+    console.log('[Schedule] Using API internal schedule (tanpa Playwright)...');
+    return await getScheduleFromAPI(day);
+  }
+  
+  // Untuk local development dengan Playwright
+  console.log('[Schedule] Using Playwright for local development...');
+  return await getScheduleWithPlaywright(day);
+}
+
+// Fungsi terpisah untuk mengambil schedule dari API internal (tanpa Playwright)
+// Bisa digunakan di Vercel atau environment tanpa browser
+async function getScheduleFromAPI(day = null) {
+  try {
+    // Mapping hari ke format API
+    const dayMap = {
+      'senin': 'SENIN', 'monday': 'SENIN', 'sen': 'SENIN',
+      'selasa': 'SELASA', 'tuesday': 'SELASA', 'sel': 'SELASA',
+      'rabu': 'RABU', 'wednesday': 'RABU', 'rab': 'RABU',
+      'kamis': 'KAMIS', 'thursday': 'KAMIS', 'kam': 'KAMIS',
+      'jumat': 'JUMAT', 'friday': 'JUMAT', 'jum': 'JUMAT',
+      'sabtu': 'SABTU', 'saturday': 'SABTU', 'sab': 'SABTU',
+      'minggu': 'MINGGU', 'sunday': 'MINGGU', 'min': 'MINGGU',
+      'random': 'RANDOM'
+    };
+    
+    const dayNames = {
+      'SENIN': 'SEN', 'SELASA': 'SEL', 'RABU': 'RAB',
+      'KAMIS': 'KAM', 'JUMAT': 'JUM', 'SABTU': 'SAB', 'MINGGU': 'MIN', 'RANDOM': 'RANDOM'
+    };
+    
+    // Tentukan hari yang akan diambil
+    const targetDay = day ? (dayMap[day.toLowerCase()] || day.toUpperCase()) : null;
+    
+    const data = { currentDay: dayNames[targetDay] || 'HARI INI', schedule: [] };
+    const seenIds = new Set();
+    
+    // Jika hari spesifik diminta, ambil dari API schedule
+    if (targetDay && targetDay !== 'RANDOM') {
+      console.log(`[Schedule API] Fetching schedule for day: ${targetDay}`);
+      const scheduleUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/schedule/data?day=${targetDay}`;
       
-      // Langsung fetch dari API explore - lebih reliable daripada scraping HTML Next.js
-      console.log(`[Schedule] Fetching from API explore for day: ${day || 'all'}`);
+      try {
+        const response = await axios.get(scheduleUrl, { 
+          timeout: 15000,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json',
+            'Referer': `${ANIMEINWEB_URL}/schedule`
+          }
+        });
+        
+        if (response.data && response.data.data) {
+          const scheduleData = response.data.data;
+          
+          // Data bisa berupa array langsung atau object dengan property movie/schedule
+          let movies = [];
+          if (Array.isArray(scheduleData)) {
+            movies = scheduleData;
+          } else if (scheduleData.movie) {
+            movies = scheduleData.movie;
+          } else if (scheduleData.schedule) {
+            movies = scheduleData.schedule;
+          }
+          
+          console.log(`[Schedule API] Found ${movies.length} anime for ${targetDay}`);
+          
+          movies.forEach(movie => {
+            const animeId = movie.id || movie.anime_id || movie.movie_id;
+            if (animeId && !seenIds.has(animeId)) {
+              seenIds.add(animeId);
+              const genres = movie.genre ? movie.genre.split(',').map(g => g.trim().toLowerCase()) : [];
+              data.schedule.push({
+                animeId: String(animeId),
+                title: (movie.title || movie.name || '').toLowerCase(),
+                genre: genres[0] || null,
+                views: movie.views || movie.view || '0',
+                favorite: movie.favorites || movie.favorite || '0',
+                releaseTime: movie.time || movie.release_time || null,
+                link: `${ANIMEINWEB_URL}/anime/${animeId}`,
+                thumbnail: movie.image_poster || movie.poster || movie.image || '',
+                cover: movie.image_cover || movie.cover || movie.image_poster || '',
+                poster: movie.image_poster || movie.poster || '',
+                isNew: movie.is_new || false,
+                status: (movie.status || 'ongoing').toLowerCase()
+              });
+            }
+          });
+        }
+      } catch (apiError) {
+        console.log(`[Schedule API] Error fetching ${targetDay}:`, apiError.message);
+      }
+    }
+    
+    // Jika tidak ada data atau request RANDOM, fallback ke API explore
+    if (data.schedule.length === 0) {
+      console.log('[Schedule API] No data from schedule API, falling back to explore API...');
       const exploreUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/explore/movie?page=0&sort=update&keyword=`;
       const exploreResponse = await axios.get(exploreUrl, { timeout: 10000 });
       
       if (exploreResponse.data && exploreResponse.data.data && exploreResponse.data.data.movie) {
-        const movies = exploreResponse.data.data.movie;
-        const dayMap = {
-          'senin': 'MONDAY', 'monday': 'MONDAY', 'SEN': 'MONDAY',
-          'selasa': 'TUESDAY', 'tuesday': 'TUESDAY', 'SEL': 'TUESDAY',
-          'rabu': 'WEDNESDAY', 'wednesday': 'WEDNESDAY', 'RAB': 'WEDNESDAY',
-          'kamis': 'THURSDAY', 'thursday': 'THURSDAY', 'KAM': 'THURSDAY',
-          'jumat': 'FRIDAY', 'friday': 'FRIDAY', 'JUM': 'FRIDAY',
-          'sabtu': 'SATURDAY', 'saturday': 'SATURDAY', 'SAB': 'SATURDAY',
-          'minggu': 'SUNDAY', 'sunday': 'SUNDAY', 'MIN': 'SUNDAY',
-          'random': 'RANDOM', 'RANDOM': 'RANDOM'
-        };
+        const movies = exploreResponse.data.data.movie.slice(0, 60);
         
-        const targetDay = day ? dayMap[day.toLowerCase()] || day.toUpperCase() : null;
-        
-        // Filter berdasarkan day jika ada
-        // Catatan: API internal tidak punya data jadwal per hari (semua day: RANDOM)
-        // Jadi kita return anime terbaru saja
-        let filteredMovies = movies;
-        if (targetDay && targetDay !== 'RANDOM') {
-          // Coba filter dulu, kalau kosong ambil semua
-          const dayFiltered = movies.filter(m => {
-            const movieDay = (m.day || '').toUpperCase();
-            return movieDay === targetDay;
-          });
-          
-          if (dayFiltered.length > 0) {
-            filteredMovies = dayFiltered.slice(0, 100);
-          } else {
-            // Tidak ada anime untuk hari ini dari API, return semua anime terbaru
-            console.log(`[Schedule] No anime found for ${targetDay}, returning latest anime instead`);
-            filteredMovies = movies.slice(0, 60);
-          }
-        } else {
-          filteredMovies = movies.slice(0, 60);
-        }
-        
-        console.log(`[Schedule] Found ${filteredMovies.length} anime from API`);
-        
-        filteredMovies.forEach(movie => {
+        movies.forEach(movie => {
           if (!seenIds.has(movie.id)) {
             seenIds.add(movie.id);
             const genres = movie.genre ? movie.genre.split(',').map(g => g.trim().toLowerCase()) : [];
             data.schedule.push({
-              animeId: movie.id,
+              animeId: String(movie.id),
               title: (movie.title || '').toLowerCase(),
               genre: genres[0] || null,
               views: movie.views || '0',
@@ -1915,76 +1967,26 @@ async function getSchedule(day = null) {
           }
         });
         
-        // Update currentDay
-        if (day) {
-          const dayNames = {
-            'MONDAY': 'SEN', 'TUESDAY': 'SEL', 'WEDNESDAY': 'RAB',
-            'THURSDAY': 'KAM', 'FRIDAY': 'JUM', 'SATURDAY': 'SAB', 'SUNDAY': 'MIN'
-          };
-          data.currentDay = dayNames[targetDay] || day.toUpperCase();
-        } else {
-          // Coba detect dari data pertama
-          if (filteredMovies.length > 0 && filteredMovies[0].day) {
-            const firstDay = filteredMovies[0].day.toUpperCase();
-            const dayNames = {
-              'MONDAY': 'SEN', 'TUESDAY': 'SEL', 'WEDNESDAY': 'RAB',
-              'THURSDAY': 'KAM', 'FRIDAY': 'JUM', 'SATURDAY': 'SAB', 'SUNDAY': 'MIN'
-            };
-            data.currentDay = dayNames[firstDay] || firstDay;
-          }
+        if (!targetDay) {
+          data.currentDay = 'TERBARU';
         }
       }
-      
-      console.log(`[Schedule] Total found: ${data.schedule.length} schedule items`);
-      
-      // Fetch cover/poster dari API untuk anime yang tidak punya image (batch, max 20)
-      const animeWithoutImage = data.schedule.filter(a => !a.thumbnail && !a.cover && !a.poster).slice(0, 20);
-      if (animeWithoutImage.length > 0) {
-        console.log(`Fetching cover/poster untuk ${animeWithoutImage.length} anime...`);
-        const imagePromises = animeWithoutImage.map(async (anime) => {
-          try {
-            const detailUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/movie/detail/${anime.animeId}`;
-            const detailResponse = await axios.get(detailUrl, { timeout: 5000 });
-            if (detailResponse.data && detailResponse.data.data && detailResponse.data.data.movie) {
-              const movie = detailResponse.data.data.movie;
-              return {
-                animeId: anime.animeId,
-                cover: movie.image_cover || '',
-                poster: movie.image_poster || '',
-                thumbnail: movie.image_cover || movie.image_poster || ''
-              };
-            }
-          } catch (error) {
-            console.log(`Failed to fetch image for anime ${anime.animeId}:`, error.message);
-          }
-          return null;
-        });
-        
-        const imageResults = await Promise.all(imagePromises);
-        imageResults.forEach(result => {
-          if (result) {
-            const scheduleItem = data.schedule.find(a => a.animeId === result.animeId);
-            if (scheduleItem) {
-              scheduleItem.cover = result.cover;
-              scheduleItem.poster = result.poster;
-              scheduleItem.thumbnail = result.thumbnail;
-            }
-          }
-        });
-      }
-      
-      return data;
-    } catch (e) {
-      console.error('Error in API fallback for schedule:', e.message);
-      throw new Error(`Gagal mengambil data schedule: ${e.message}`);
     }
+    
+    console.log(`[Schedule API] Total found: ${data.schedule.length} anime`);
+    return data;
+    
+  } catch (error) {
+    console.error('[Schedule API] Error:', error.message);
+    throw new Error(`Gagal mengambil data schedule: ${error.message}`);
   }
+}
 
-  // Gunakan Playwright untuk local development (bukan Vercel)
-  if (usePlaywright) {
-    try {
-      const { chromium } = require('playwright');
-      const browser = await chromium.launch({ 
+// Gunakan Playwright untuk local development (bukan Vercel)
+async function getScheduleWithPlaywright(day = null) {
+  try {
+    const { chromium } = require('playwright');
+    const browser = await chromium.launch({ 
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
     });
@@ -1993,33 +1995,150 @@ async function getSchedule(day = null) {
     // Block images, CSS, fonts untuk lebih cepat
     await page.route('**/*.{png,jpg,jpeg,gif,svg,webp,css,woff,woff2,ttf}', route => route.abort());
     
-    await page.goto(`${ANIMEINWEB_URL}/schedule`, { waitUntil: 'domcontentloaded', timeout: 10000 });
-    // Tidak perlu wait, langsung evaluate karena sudah domcontentloaded
+    await page.goto(`${ANIMEINWEB_URL}/schedule`, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    
+    // Tunggu sampai tab benar-benar muncul (bisa pakai networkidle atau wait selector)
+    try {
+      await page.waitForSelector('[role="tab"], button[class*="tab"], [class*="tab"]', { timeout: 5000, state: 'visible' });
+    } catch (e) {
+      console.log('⚠️ Tab selector tidak ditemukan, lanjutkan...');
+    }
+    
+    // Tunggu sedikit lagi untuk memastikan semua content ter-load
+    await page.waitForTimeout(1000);
     
     // Jika day diberikan, klik tab hari tersebut
     if (day) {
       const dayMap = {
-        'senin': 'SEN', 'monday': 'SEN',
-        'selasa': 'SEL', 'tuesday': 'SEL',
-        'rabu': 'RAB', 'wednesday': 'RAB',
-        'kamis': 'KAM', 'thursday': 'KAM',
-        'jumat': 'JUM', 'friday': 'JUM',
-        'sabtu': 'SAB', 'saturday': 'SAB',
-        'minggu': 'MIN', 'sunday': 'MIN',
-        'random': 'RANDOM'
+        'senin': ['SEN', 'SENIN'], 'monday': ['SEN', 'SENIN'],
+        'selasa': ['SEL', 'SELASA'], 'tuesday': ['SEL', 'SELASA'],
+        'rabu': ['RAB', 'RABU'], 'wednesday': ['RAB', 'RABU'],
+        'kamis': ['KAM', 'KAMIS'], 'thursday': ['KAM', 'KAMIS'],
+        'jumat': ['JUM', 'JUMAT'], 'friday': ['JUM', 'JUMAT'],
+        'sabtu': ['SAB', 'SABTU'], 'saturday': ['SAB', 'SABTU'],
+        'minggu': ['MIN', 'MINGGU'], 'sunday': ['MIN', 'MINGGU'],
+        'random': ['RANDOM']
       };
       
-      const dayTab = dayMap[day.toLowerCase()] || day.toUpperCase();
+      const dayTabs = dayMap[day.toLowerCase()] || [day.toUpperCase()];
+      let clicked = false;
+      
+      // Ambil semua tab dulu, lalu cari yang match
       try {
-        // Coba click langsung tanpa wait terlalu lama
-        await Promise.race([
-          page.click(`button:has-text("${dayTab}")`, { timeout: 1000 }),
-          new Promise(resolve => setTimeout(resolve, 1000))
-        ]);
-        await page.waitForTimeout(300); // Minimal wait untuk content load
+        // Coba berbagai selector untuk cari tab
+        let allTabs = await page.locator('[role="tab"]').all();
+        if (allTabs.length === 0) {
+          // Coba selector alternatif
+          allTabs = await page.locator('button[class*="tab"], [class*="Tab"], button').all();
+        }
+        console.log(`[Schedule] Found ${allTabs.length} tabs`);
+        
+        // Debug: print semua tab text
+        if (allTabs.length > 0) {
+          const tabTexts = await Promise.all(allTabs.map(async tab => {
+            try {
+              return await tab.textContent();
+            } catch (e) {
+              return null;
+            }
+          }));
+          console.log(`[Schedule] Tab texts: ${tabTexts.filter(t => t).join(', ')}`);
+        }
+        
+        // Cari tab yang text-nya match dengan hari yang dicari
+        for (const tab of allTabs) {
+          try {
+            const tabText = await tab.textContent();
+            const normalizedText = (tabText || '').trim().toUpperCase();
+            
+            // Cek apakah tab text match dengan salah satu variasi nama hari
+            const isMatch = dayTabs.some(dayTab => 
+              normalizedText === dayTab.toUpperCase() || 
+              normalizedText.includes(dayTab.toUpperCase()) ||
+              dayTab.toUpperCase().includes(normalizedText)
+            );
+            
+            if (isMatch) {
+              console.log(`[Schedule] Found matching tab: "${tabText}" for day: ${day}`);
+              
+              // Scroll ke tab jika perlu
+              await tab.scrollIntoViewIfNeeded();
+              await page.waitForTimeout(200);
+              
+              // Click tab
+              await tab.click({ timeout: 5000 });
+              
+              // Tunggu sampai tab benar-benar aktif
+              let retries = 0;
+              let isActive = false;
+              while (retries < 5 && !isActive) {
+                await page.waitForTimeout(500);
+                isActive = await tab.getAttribute('aria-selected') === 'true';
+                retries++;
+              }
+              
+              if (isActive) {
+                console.log(`✅ Tab "${tabText}" berhasil di-click dan aktif`);
+                clicked = true;
+                
+                // Tunggu sampai content benar-benar berubah
+                // Tunggu sampai ada perubahan di DOM atau sampai selector muncul
+                await page.waitForTimeout(2000);
+                
+                // Verifikasi bahwa content sudah berubah dengan cek apakah ada anime links
+                try {
+                  await page.waitForSelector('a[href*="/anime/"]', { timeout: 3000, state: 'visible' });
+                } catch (e) {
+                  console.log('⚠️ Anime links belum muncul setelah click tab');
+                }
+                
+                break;
+              } else {
+                console.log(`⚠️ Tab "${tabText}" di-click tapi tidak aktif setelah ${retries} retries`);
+              }
+            }
+          } catch (e) {
+            console.log(`Error checking tab: ${e.message}`);
+            continue;
+          }
+        }
       } catch (e) {
-        console.log(`Tab ${dayTab} tidak ditemukan, menggunakan default`);
+        console.log(`Error finding tabs: ${e.message}`);
       }
+      
+      if (!clicked) {
+        console.log(`⚠️ Tidak ada tab yang berhasil di-click untuk hari: ${day}`);
+        console.log(`⚠️ Mencoba fallback dengan selector langsung...`);
+        
+        // Fallback: coba click langsung dengan selector
+        for (const dayTab of dayTabs) {
+          try {
+            const tab = await page.locator(`[role="tab"]`).filter({ hasText: dayTab }).first();
+            if (await tab.isVisible({ timeout: 2000 })) {
+              await tab.click({ timeout: 5000 });
+              await page.waitForTimeout(1500);
+              const isActive = await tab.getAttribute('aria-selected');
+              if (isActive === 'true') {
+                console.log(`✅ Tab ${dayTab} berhasil di-click (fallback)`);
+                clicked = true;
+                break;
+              }
+            }
+          } catch (e) {
+            continue;
+          }
+        }
+      }
+      
+      // Tunggu sampai content tab aktif benar-benar muncul
+      try {
+        await page.waitForSelector('a[href*="/anime/"]', { timeout: 5000, state: 'visible' });
+      } catch (e) {
+        console.log('⚠️ Content belum muncul, lanjutkan dengan data yang ada...');
+      }
+      
+      // Tunggu sedikit lagi untuk memastikan content sudah load
+      await page.waitForTimeout(800);
     }
     
     const scheduleData = await page.evaluate(() => {
@@ -2029,13 +2148,73 @@ async function getSchedule(day = null) {
       };
       
       // Extract current active tab
-      const activeTab = document.querySelector('[role="tab"][aria-selected="true"]');
-      if (activeTab) {
-        data.currentDay = activeTab.textContent.trim();
+      const currentActiveTab = document.querySelector('[role="tab"][aria-selected="true"]');
+      if (currentActiveTab) {
+        data.currentDay = currentActiveTab.textContent.trim();
       }
       
-      // Extract semua anime dari schedule
-      const animeLinks = document.querySelectorAll('a[href*="/anime/"]');
+      // Extract anime hanya dari tab aktif (yang visible)
+      // Cari panel/tab panel yang aktif berdasarkan tab aktif
+      let activePanel = null;
+      
+      // Ambil text dari tab aktif (sudah diambil di atas)
+      const activeTabText = currentActiveTab ? currentActiveTab.textContent.trim() : '';
+      
+      // Cari tabpanel yang terkait dengan tab aktif
+      const tabPanels = document.querySelectorAll('[role="tabpanel"]');
+      tabPanels.forEach((panel, index) => {
+        const isHidden = panel.style.display === 'none' || 
+                        panel.getAttribute('hidden') !== null ||
+                        panel.classList.contains('hidden') ||
+                        window.getComputedStyle(panel).display === 'none';
+        if (!isHidden) {
+          // Cek apakah panel ini terkait dengan tab aktif (biasanya berdasarkan index atau aria-labelledby)
+          const ariaLabelledBy = panel.getAttribute('aria-labelledby');
+          const tabId = currentActiveTab ? currentActiveTab.id : null;
+          if (ariaLabelledBy === tabId || !activePanel) {
+            activePanel = panel;
+          }
+        }
+      });
+      
+      // Jika tidak ada tabpanel, cari container yang visible dan terkait dengan tab aktif
+      if (!activePanel) {
+        // Coba cari berdasarkan data attribute atau class yang menunjukkan tab aktif
+        const possibleContainers = document.querySelectorAll('[data-day], [class*="schedule"], [class*="day"], [class*="grid"], [class*="container"]');
+        possibleContainers.forEach(container => {
+          const isHidden = container.style.display === 'none' || 
+                          window.getComputedStyle(container).display === 'none' ||
+                          window.getComputedStyle(container).visibility === 'hidden' ||
+                          container.offsetParent === null;
+          if (!isHidden && container.querySelector('a[href*="/anime/"]')) {
+            // Prioritaskan container yang lebih spesifik atau yang punya banyak anime links
+            const linkCount = container.querySelectorAll('a[href*="/anime/"]').length;
+            if (!activePanel || linkCount > (activePanel.querySelectorAll('a[href*="/anime/"]').length || 0)) {
+              activePanel = container;
+            }
+          }
+        });
+      }
+      
+      // Ambil link anime hanya dari panel aktif atau yang visible
+      let animeLinks;
+      if (activePanel) {
+        animeLinks = activePanel.querySelectorAll('a[href*="/anime/"]');
+        console.log(`[Schedule] Found ${animeLinks.length} anime links in active panel`);
+      } else {
+        // Fallback: ambil semua tapi filter yang benar-benar visible dan di viewport
+        const allLinks = document.querySelectorAll('a[href*="/anime/"]');
+        animeLinks = Array.from(allLinks).filter(link => {
+          const rect = link.getBoundingClientRect();
+          const isVisible = link.offsetParent !== null && 
+                           window.getComputedStyle(link).display !== 'none' &&
+                           window.getComputedStyle(link).visibility !== 'hidden' &&
+                           rect.width > 0 && rect.height > 0 &&
+                           rect.top >= 0 && rect.left >= 0;
+          return isVisible;
+        });
+        console.log(`[Schedule] Fallback: Found ${animeLinks.length} visible anime links`);
+      }
       animeLinks.forEach(link => {
         const href = link.href;
         const text = link.textContent.trim();
@@ -2220,15 +2399,14 @@ async function getSchedule(day = null) {
       });
     }
     
+    await browser.close();
     return scheduleData;
-    } catch (error) {
-      console.error('Error fetching schedule:', error);
-      throw error;
-    }
+  } catch (error) {
+    console.error('Error fetching schedule with Playwright:', error);
+    // Fallback ke API jika Playwright gagal
+    console.log('[Schedule] Playwright failed, falling back to API...');
+    return await getScheduleFromAPI(day);
   }
-  
-  // Jika sampai sini berarti tidak ada browser automation yang tersedia
-  throw new Error('Browser automation tidak tersedia. Schedule hanya tersedia dengan Playwright atau Puppeteer.');
 }
 
 // Ambil anime trending/popular dari homepage - menggunakan API internal untuk lebih cepat
