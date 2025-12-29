@@ -1,10 +1,17 @@
 # 📚 Anime API - Dokumentasi Lengkap
 
-Dokumentasi lengkap untuk semua endpoint API Anime dari NontonAnimeID & AnimeInWeb.
+Dokumentasi lengkap untuk semua endpoint API Anime dari NontonAnimeID, AnimeInWeb, dan **MyAnimeList**.
 
 ## 🎯 Overview
 
 API ini menyediakan akses ke data anime real-time dari berbagai sumber dengan performa tinggi dan tanpa iklan. Semua endpoint menggunakan format response yang konsisten dan mendukung CORS untuk penggunaan di frontend.
+
+**Fitur Utama:**
+- ✅ Data anime dari multiple source (NontonAnimeID, AnimeInWeb)
+- ✅ Video streaming dengan multiple resolusi
+- ✅ **Integrasi MyAnimeList** - Login, bookmark, statistik user
+- ✅ Sync bookmark dari MAL ke web kamu
+- ✅ Download episode dan batch
 
 **Base URL:**
 - **Local**: `http://localhost:3000/api/v1`
@@ -14,6 +21,7 @@ API ini menyediakan akses ke data anime real-time dari berbagai sumber dengan pe
 
 ## 📋 Daftar Isi
 
+### NontonAnimeID & AnimeInWeb
 1. [Episode Terbaru](#1-episode-terbaru)
 2. [Detail Anime](#2-detail-anime)
 3. [Pencarian Anime](#3-pencarian-anime)
@@ -27,6 +35,20 @@ API ini menyediakan akses ke data anime real-time dari berbagai sumber dengan pe
 11. [Anime Hari Ini](#11-anime-hari-ini)
 12. [Download Episode](#12-download-episode)
 13. [Download Batch](#13-download-batch)
+
+### MyAnimeList Integration
+14. [MAL: Login (OAuth2)](#14-mal-login-oauth2)
+15. [MAL: Callback OAuth2](#15-mal-callback-oauth2)
+16. [MAL: Refresh Token](#16-mal-refresh-token)
+17. [MAL: User Profile](#17-mal-user-profile)
+18. [MAL: User Anime List (Bookmark)](#18-mal-user-anime-list-bookmark)
+19. [MAL: Anime Detail](#19-mal-anime-detail)
+20. [MAL: Search Anime](#20-mal-search-anime)
+21. [MAL: Anime Ranking](#21-mal-anime-ranking)
+22. [MAL: Seasonal Anime](#22-mal-seasonal-anime)
+23. [MAL: Update Anime List](#23-mal-update-anime-list)
+24. [MAL: Delete dari List](#24-mal-delete-dari-list)
+25. [MAL: Sync Bookmark](#25-mal-sync-bookmark)
 
 ---
 
@@ -785,6 +807,876 @@ data.data.downloads.forEach(download => {
 
 ---
 
+## 14. MAL: Login (OAuth2)
+
+Mendapatkan URL authorization untuk login ke MyAnimeList.
+
+### Endpoint
+```
+GET /api/v1/mal/auth
+```
+
+### Parameter
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `state` | string | No | Custom state untuk tracking |
+
+### Response Format
+
+```json
+{
+  "success": true,
+  "data": {
+    "authorization_url": "https://myanimelist.net/v1/oauth2/authorize?...",
+    "state": "random_state_string",
+    "message": "Redirect user ke authorization_url untuk login MyAnimeList"
+  }
+}
+```
+
+### Flow Login
+
+1. Frontend panggil `/api/v1/mal/auth`
+2. Redirect user ke `authorization_url`
+3. User login di MAL dan authorize app
+4. MAL redirect ke callback URL dengan `code` dan `state`
+5. Backend exchange code untuk token
+
+### Contoh Penggunaan
+
+**JavaScript:**
+```javascript
+// Step 1: Get authorization URL
+const response = await fetch('http://localhost:3000/api/v1/mal/auth');
+const data = await response.json();
+
+// Step 2: Redirect user ke MAL
+window.location.href = data.data.authorization_url;
+```
+
+---
+
+## 15. MAL: Callback OAuth2
+
+Endpoint callback setelah user login di MyAnimeList.
+
+### Endpoint
+```
+GET /api/v1/mal/callback?code={code}&state={state}
+```
+
+### Parameter
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `code` | string | Yes | Authorization code dari MAL |
+| `state` | string | Yes | State dari step sebelumnya |
+
+### Response Format
+
+```json
+{
+  "success": true,
+  "data": {
+    "user": {
+      "id": 12345678,
+      "name": "username",
+      "picture": "https://...",
+      "anime_statistics": {
+        "num_items_watching": 10,
+        "num_items_completed": 150,
+        "num_items_on_hold": 5,
+        "num_items_dropped": 3,
+        "num_items_plan_to_watch": 50,
+        "num_items": 218,
+        "num_episodes": 3500,
+        "mean_score": 7.5
+      }
+    },
+    "token": {
+      "access_token": "eyJhbGciOiJSUzI1NiIs...",
+      "refresh_token": "def50200...",
+      "expires_in": 2678400,
+      "expires_at": 1738836000000
+    },
+    "message": "Login berhasil! Simpan token ini untuk request selanjutnya"
+  }
+}
+```
+
+### Contoh Penggunaan
+
+**JavaScript:**
+```javascript
+// Setelah redirect dari MAL, parse URL params
+const urlParams = new URLSearchParams(window.location.search);
+const code = urlParams.get('code');
+const state = urlParams.get('state');
+
+// Exchange code untuk token
+const response = await fetch(`http://localhost:3000/api/v1/mal/callback?code=${code}&state=${state}`);
+const data = await response.json();
+
+// Simpan token
+localStorage.setItem('mal_access_token', data.data.token.access_token);
+localStorage.setItem('mal_refresh_token', data.data.token.refresh_token);
+localStorage.setItem('mal_user', JSON.stringify(data.data.user));
+```
+
+---
+
+## 16. MAL: Refresh Token
+
+Refresh access token yang sudah expired.
+
+### Endpoint
+```
+POST /api/v1/mal/refresh
+```
+
+### Body
+
+```json
+{
+  "refresh_token": "def50200..."
+}
+```
+
+### Response Format
+
+```json
+{
+  "success": true,
+  "data": {
+    "access_token": "new_access_token...",
+    "refresh_token": "new_refresh_token...",
+    "expires_in": 2678400,
+    "expires_at": 1738836000000
+  }
+}
+```
+
+### Contoh Penggunaan
+
+**JavaScript:**
+```javascript
+const refreshToken = localStorage.getItem('mal_refresh_token');
+
+const response = await fetch('http://localhost:3000/api/v1/mal/refresh', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ refresh_token: refreshToken })
+});
+
+const data = await response.json();
+
+// Update token
+localStorage.setItem('mal_access_token', data.data.access_token);
+localStorage.setItem('mal_refresh_token', data.data.refresh_token);
+```
+
+---
+
+## 17. MAL: User Profile
+
+Mendapatkan profil user yang sudah login beserta statistik anime.
+
+### Endpoint
+```
+GET /api/v1/mal/user
+```
+
+### Headers
+
+| Header | Value |
+|--------|-------|
+| `Authorization` | `Bearer {access_token}` |
+
+### Response Format
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 12345678,
+    "name": "username",
+    "picture": "https://api-cdn.myanimelist.net/images/...",
+    "gender": "male",
+    "birthday": "1990-01-15",
+    "location": "Indonesia",
+    "joined_at": "2015-05-20T10:30:00+00:00",
+    "anime_statistics": {
+      "num_items_watching": 10,
+      "num_items_completed": 150,
+      "num_items_on_hold": 5,
+      "num_items_dropped": 3,
+      "num_items_plan_to_watch": 50,
+      "num_items": 218,
+      "num_days_watched": 45.5,
+      "num_episodes": 3500,
+      "num_times_rewatched": 20,
+      "mean_score": 7.5
+    }
+  }
+}
+```
+
+### Contoh Penggunaan
+
+**JavaScript:**
+```javascript
+const accessToken = localStorage.getItem('mal_access_token');
+
+const response = await fetch('http://localhost:3000/api/v1/mal/user', {
+  headers: {
+    'Authorization': `Bearer ${accessToken}`
+  }
+});
+
+const data = await response.json();
+console.log(`Halo, ${data.data.name}!`);
+console.log(`Total anime: ${data.data.anime_statistics.num_items}`);
+console.log(`Total episode ditonton: ${data.data.anime_statistics.num_episodes}`);
+```
+
+---
+
+## 18. MAL: User Anime List (Bookmark)
+
+Mendapatkan daftar anime user (bookmark/watchlist).
+
+### Endpoint
+```
+GET /api/v1/mal/animelist
+```
+
+### Headers
+
+| Header | Value |
+|--------|-------|
+| `Authorization` | `Bearer {access_token}` |
+
+### Parameter
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `status` | string | No | Filter: `watching`, `completed`, `on_hold`, `dropped`, `plan_to_watch` |
+| `sort` | string | No | Sort: `list_score`, `list_updated_at`, `anime_title`, `anime_start_date` |
+| `limit` | number | No | Jumlah per page (max 1000, default 100) |
+| `offset` | number | No | Offset untuk pagination |
+
+### Response Format
+
+```json
+{
+  "success": true,
+  "data": {
+    "stats": {
+      "total": 218,
+      "watching": 10,
+      "completed": 150,
+      "on_hold": 5,
+      "dropped": 3,
+      "plan_to_watch": 50,
+      "total_episodes_watched": 3500
+    },
+    "anime_list": [
+      {
+        "mal_id": 21,
+        "title": "one punch man",
+        "main_picture": {
+          "medium": "https://...",
+          "large": "https://..."
+        },
+        "synopsis": "Saitama adalah pahlawan...",
+        "mean_score": 8.5,
+        "genres": ["action", "comedy", "parody"],
+        "studios": [{"id": 11, "name": "madhouse"}],
+        "status": "finished_airing",
+        "num_episodes": 12,
+        "start_date": "2015-10-05",
+        "end_date": "2015-12-21",
+        "start_season": {"year": 2015, "season": "fall"},
+        "broadcast": {"day_of_the_week": "monday", "start_time": "01:05"},
+        "media_type": "tv",
+        "rating": "pg_13",
+        "list_status": {
+          "status": "completed",
+          "score": 9,
+          "num_episodes_watched": 12,
+          "is_rewatching": false,
+          "updated_at": "2024-01-15T10:30:00+00:00",
+          "start_date": "2024-01-01",
+          "finish_date": "2024-01-10",
+          "num_times_rewatched": 2
+        }
+      }
+    ],
+    "paging": {
+      "previous": null,
+      "next": "https://..."
+    }
+  }
+}
+```
+
+### Contoh Penggunaan
+
+**JavaScript:**
+```javascript
+const accessToken = localStorage.getItem('mal_access_token');
+
+// Ambil semua anime list
+const response = await fetch('http://localhost:3000/api/v1/mal/animelist', {
+  headers: { 'Authorization': `Bearer ${accessToken}` }
+});
+
+const data = await response.json();
+console.log(`Total anime: ${data.data.stats.total}`);
+console.log(`Sedang ditonton: ${data.data.stats.watching}`);
+console.log(`Sudah selesai: ${data.data.stats.completed}`);
+
+// Filter hanya yang sedang ditonton
+const watchingResponse = await fetch('http://localhost:3000/api/v1/mal/animelist?status=watching', {
+  headers: { 'Authorization': `Bearer ${accessToken}` }
+});
+```
+
+---
+
+## 19. MAL: Anime Detail
+
+Mendapatkan detail lengkap anime dari MyAnimeList.
+
+### Endpoint
+```
+GET /api/v1/mal/anime/{mal_id}
+```
+
+### Headers (Optional)
+
+| Header | Value |
+|--------|-------|
+| `Authorization` | `Bearer {access_token}` (untuk lihat status di list user) |
+
+### Response Format
+
+```json
+{
+  "success": true,
+  "data": {
+    "mal_id": 21,
+    "title": "one punch man",
+    "alternative_titles": {
+      "synonyms": ["OPM"],
+      "en": "One Punch Man",
+      "ja": "ワンパンマン"
+    },
+    "main_picture": {
+      "medium": "https://...",
+      "large": "https://..."
+    },
+    "synopsis": "Saitama adalah pahlawan yang bisa mengalahkan siapapun...",
+    "mean_score": 8.5,
+    "rank": 125,
+    "popularity": 5,
+    "num_list_users": 3500000,
+    "media_type": "tv",
+    "status": "finished_airing",
+    "genres": ["action", "comedy", "parody", "sci-fi", "super power"],
+    "studios": [{"id": 11, "name": "madhouse"}],
+    "num_episodes": 12,
+    "start_date": "2015-10-05",
+    "end_date": "2015-12-21",
+    "start_season": {"year": 2015, "season": "fall"},
+    "broadcast": {"day_of_the_week": "monday", "start_time": "01:05"},
+    "source": "web_manga",
+    "average_episode_duration": 1440,
+    "rating": "pg_13",
+    "pictures": [
+      {"medium": "https://...", "large": "https://..."}
+    ],
+    "related_anime": [
+      {
+        "mal_id": 34134,
+        "title": "one punch man 2nd season",
+        "relation_type": "sequel",
+        "relation_type_formatted": "Sequel"
+      }
+    ],
+    "recommendations": [
+      {
+        "mal_id": 31964,
+        "title": "mob psycho 100",
+        "num_recommendations": 150
+      }
+    ],
+    "statistics": {
+      "status": {
+        "watching": 150000,
+        "completed": 2800000,
+        "on_hold": 100000,
+        "dropped": 50000,
+        "plan_to_watch": 400000
+      }
+    },
+    "my_list_status": {
+      "status": "completed",
+      "score": 9,
+      "num_episodes_watched": 12
+    }
+  }
+}
+```
+
+### Contoh Penggunaan
+
+**JavaScript:**
+```javascript
+const malId = 21; // One Punch Man
+const accessToken = localStorage.getItem('mal_access_token');
+
+const response = await fetch(`http://localhost:3000/api/v1/mal/anime/${malId}`, {
+  headers: accessToken ? { 'Authorization': `Bearer ${accessToken}` } : {}
+});
+
+const data = await response.json();
+console.log(`Title: ${data.data.title}`);
+console.log(`Score: ${data.data.mean_score}`);
+console.log(`Episodes: ${data.data.num_episodes}`);
+console.log(`Status: ${data.data.status}`);
+```
+
+---
+
+## 20. MAL: Search Anime
+
+Mencari anime di MyAnimeList.
+
+### Endpoint
+```
+GET /api/v1/mal/search?q={query}
+```
+
+### Parameter
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `q` | string | Yes | Keyword pencarian |
+| `limit` | number | No | Jumlah hasil (max 100, default 10) |
+
+### Response Format
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "mal_id": 21,
+      "title": "one punch man",
+      "main_picture": {
+        "medium": "https://...",
+        "large": "https://..."
+      },
+      "synopsis": "Saitama adalah...",
+      "mean_score": 8.5,
+      "genres": ["action", "comedy"],
+      "studios": [{"id": 11, "name": "madhouse"}],
+      "status": "finished_airing",
+      "num_episodes": 12,
+      "start_date": "2015-10-05",
+      "start_season": {"year": 2015, "season": "fall"},
+      "media_type": "tv"
+    }
+  ],
+  "query": "one punch man"
+}
+```
+
+### Contoh Penggunaan
+
+**JavaScript:**
+```javascript
+const query = 'naruto';
+const response = await fetch(`http://localhost:3000/api/v1/mal/search?q=${encodeURIComponent(query)}&limit=20`);
+const data = await response.json();
+
+data.data.forEach(anime => {
+  console.log(`${anime.title} (${anime.mean_score})`);
+});
+```
+
+---
+
+## 21. MAL: Anime Ranking
+
+Mendapatkan ranking anime dari MyAnimeList.
+
+### Endpoint
+```
+GET /api/v1/mal/ranking
+```
+
+### Parameter
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `type` | string | No | Ranking type (default: `all`) |
+| `limit` | number | No | Jumlah per page (max 500, default 10) |
+| `offset` | number | No | Offset untuk pagination |
+
+### Ranking Types
+
+| Type | Description |
+|------|-------------|
+| `all` | Top anime overall |
+| `airing` | Top anime yang sedang tayang |
+| `upcoming` | Top anime yang akan datang |
+| `tv` | Top anime TV series |
+| `ova` | Top OVA |
+| `movie` | Top anime movie |
+| `special` | Top special |
+| `bypopularity` | Top by popularity |
+| `favorite` | Top by favorites |
+
+### Response Format
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "rank": 1,
+      "mal_id": 5114,
+      "title": "fullmetal alchemist: brotherhood",
+      "main_picture": {...},
+      "mean_score": 9.1,
+      "genres": ["action", "adventure", "drama", "fantasy"],
+      "status": "finished_airing",
+      "num_episodes": 64
+    }
+  ],
+  "ranking_type": "all"
+}
+```
+
+### Contoh Penggunaan
+
+**JavaScript:**
+```javascript
+// Top 10 anime overall
+const response = await fetch('http://localhost:3000/api/v1/mal/ranking?type=all&limit=10');
+const data = await response.json();
+
+data.data.forEach(anime => {
+  console.log(`#${anime.rank} ${anime.title} (${anime.mean_score})`);
+});
+
+// Top anime yang sedang tayang
+const airingResponse = await fetch('http://localhost:3000/api/v1/mal/ranking?type=airing&limit=10');
+```
+
+---
+
+## 22. MAL: Seasonal Anime
+
+Mendapatkan daftar anime per musim.
+
+### Endpoint
+```
+GET /api/v1/mal/season/{year}/{season}
+```
+
+### Parameter
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `year` | number | Yes | Tahun (contoh: 2024) |
+| `season` | string | Yes | Season: `winter`, `spring`, `summer`, `fall` |
+| `sort` | string | No | Sort: `anime_score`, `anime_num_list_users` |
+| `limit` | number | No | Jumlah per page (max 500, default 10) |
+| `offset` | number | No | Offset untuk pagination |
+
+### Response Format
+
+```json
+{
+  "success": true,
+  "season": {"year": 2024, "season": "winter"},
+  "data": [
+    {
+      "mal_id": 52991,
+      "title": "sousou no frieren",
+      "main_picture": {...},
+      "mean_score": 9.1,
+      "genres": ["adventure", "drama", "fantasy"],
+      "status": "currently_airing",
+      "num_episodes": 28,
+      "broadcast": {"day_of_the_week": "friday", "start_time": "23:00"}
+    }
+  ]
+}
+```
+
+### Contoh Penggunaan
+
+**JavaScript:**
+```javascript
+const year = 2024;
+const season = 'winter';
+const response = await fetch(`http://localhost:3000/api/v1/mal/season/${year}/${season}?limit=20`);
+const data = await response.json();
+
+console.log(`Anime ${season} ${year}:`);
+data.data.forEach(anime => {
+  console.log(`- ${anime.title} (${anime.mean_score})`);
+});
+```
+
+---
+
+## 23. MAL: Update Anime List
+
+Menambah atau update anime di list user.
+
+### Endpoint
+```
+PATCH /api/v1/mal/animelist/{animeId}
+```
+
+### Headers
+
+| Header | Value |
+|--------|-------|
+| `Authorization` | `Bearer {access_token}` |
+| `Content-Type` | `application/json` |
+
+### Body
+
+```json
+{
+  "status": "watching",
+  "score": 8,
+  "num_episodes_watched": 5
+}
+```
+
+### Status Values
+
+| Status | Description |
+|--------|-------------|
+| `watching` | Sedang ditonton |
+| `completed` | Sudah selesai |
+| `on_hold` | Ditunda |
+| `dropped` | Berhenti nonton |
+| `plan_to_watch` | Mau ditonton |
+
+### Response Format
+
+```json
+{
+  "success": true,
+  "data": {
+    "status": "watching",
+    "score": 8,
+    "num_episodes_watched": 5,
+    "is_rewatching": false,
+    "updated_at": "2024-01-15T10:30:00+00:00"
+  },
+  "message": "Anime list berhasil diupdate"
+}
+```
+
+### Contoh Penggunaan
+
+**JavaScript:**
+```javascript
+const accessToken = localStorage.getItem('mal_access_token');
+const animeId = 21; // One Punch Man
+
+// Tambah ke watching list
+const response = await fetch(`http://localhost:3000/api/v1/mal/animelist/${animeId}`, {
+  method: 'PATCH',
+  headers: {
+    'Authorization': `Bearer ${accessToken}`,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    status: 'watching',
+    num_episodes_watched: 3
+  })
+});
+
+// Mark as completed dengan score
+const completeResponse = await fetch(`http://localhost:3000/api/v1/mal/animelist/${animeId}`, {
+  method: 'PATCH',
+  headers: {
+    'Authorization': `Bearer ${accessToken}`,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    status: 'completed',
+    score: 9,
+    num_episodes_watched: 12
+  })
+});
+```
+
+---
+
+## 24. MAL: Delete dari List
+
+Menghapus anime dari list user.
+
+### Endpoint
+```
+DELETE /api/v1/mal/animelist/{animeId}
+```
+
+### Headers
+
+| Header | Value |
+|--------|-------|
+| `Authorization` | `Bearer {access_token}` |
+
+### Response Format
+
+```json
+{
+  "success": true,
+  "data": {
+    "success": true,
+    "message": "Anime berhasil dihapus dari list"
+  }
+}
+```
+
+### Contoh Penggunaan
+
+**JavaScript:**
+```javascript
+const accessToken = localStorage.getItem('mal_access_token');
+const animeId = 21;
+
+const response = await fetch(`http://localhost:3000/api/v1/mal/animelist/${animeId}`, {
+  method: 'DELETE',
+  headers: {
+    'Authorization': `Bearer ${accessToken}`
+  }
+});
+
+const data = await response.json();
+if (data.success) {
+  console.log('Anime berhasil dihapus dari list!');
+}
+```
+
+---
+
+## 25. MAL: Sync Bookmark
+
+Sync bookmark dari MAL dengan data anime lengkap. Gunakan endpoint ini untuk mendapatkan seluruh watchlist user beserta statistik.
+
+### Endpoint
+```
+GET /api/v1/mal/sync
+```
+
+### Headers
+
+| Header | Value |
+|--------|-------|
+| `Authorization` | `Bearer {access_token}` |
+
+### Parameter
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `status` | string | No | Filter status (watching, completed, dll) |
+
+### Response Format
+
+```json
+{
+  "success": true,
+  "data": {
+    "stats": {
+      "total": 218,
+      "watching": 10,
+      "completed": 150,
+      "on_hold": 5,
+      "dropped": 3,
+      "plan_to_watch": 50,
+      "total_episodes_watched": 3500
+    },
+    "anime_list": [
+      {
+        "mal_id": 21,
+        "title": "one punch man",
+        "synopsis": "Saitama adalah...",
+        "mean_score": 8.5,
+        "genres": ["action", "comedy"],
+        "studios": [{"id": 11, "name": "madhouse"}],
+        "status": "finished_airing",
+        "num_episodes": 12,
+        "start_date": "2015-10-05",
+        "end_date": "2015-12-21",
+        "start_season": {"year": 2015, "season": "fall"},
+        "broadcast": {"day_of_the_week": "monday"},
+        "media_type": "tv",
+        "rating": "pg_13",
+        "main_picture": {...},
+        "list_status": {
+          "status": "completed",
+          "score": 9,
+          "num_episodes_watched": 12
+        },
+        "animeinweb_id": null,
+        "has_video": false
+      }
+    ],
+    "message": "Data anime dari MAL. Gunakan endpoint /api/v1/animeinweb untuk video streaming."
+  }
+}
+```
+
+### Contoh Penggunaan dengan Frontend
+
+**JavaScript:**
+```javascript
+const accessToken = localStorage.getItem('mal_access_token');
+
+// Sync seluruh bookmark
+const response = await fetch('http://localhost:3000/api/v1/mal/sync', {
+  headers: { 'Authorization': `Bearer ${accessToken}` }
+});
+
+const data = await response.json();
+
+// Tampilkan statistik
+console.log(`Total anime: ${data.data.stats.total}`);
+console.log(`Sedang ditonton: ${data.data.stats.watching}`);
+console.log(`Sudah selesai: ${data.data.stats.completed}`);
+console.log(`Total episode: ${data.data.stats.total_episodes_watched}`);
+
+// Untuk setiap anime yang sedang ditonton, cari video di animeinweb
+const watching = data.data.anime_list.filter(a => a.list_status.status === 'watching');
+
+for (const anime of watching) {
+  // Search di animeinweb berdasarkan title
+  const searchRes = await fetch(`http://localhost:3000/api/v1/search?q=${encodeURIComponent(anime.title)}`);
+  const searchData = await searchRes.json();
+  
+  if (searchData.data && searchData.data.length > 0) {
+    console.log(`Found ${anime.title} di animeinweb!`);
+    // Bisa lanjut ambil video episode
+  }
+}
+```
+
+---
+
 ## 🔧 Error Handling
 
 Semua endpoint mengembalikan format error yang konsisten:
@@ -874,6 +1766,143 @@ async function fetchWithRetry(url, retries = 3) {
 
 ---
 
+## 🔐 Setup MyAnimeList Integration
+
+Untuk menggunakan fitur MAL, kamu perlu:
+
+### 1. Daftar API di MyAnimeList
+
+1. Buka [https://myanimelist.net/apiconfig](https://myanimelist.net/apiconfig)
+2. Login dengan akun MAL kamu
+3. Klik "Create ID"
+4. Isi form:
+   - **App Name**: Nama aplikasi kamu
+   - **App Type**: Web
+   - **App Description**: Deskripsi singkat
+   - **App Redirect URL**: `http://localhost:3000/api/v1/mal/callback` (untuk development)
+   - **Homepage URL**: URL website kamu
+5. Submit dan catat **Client ID** dan **Client Secret**
+
+### 2. Set Environment Variables
+
+Tambahkan di file `.env`:
+
+```env
+MAL_CLIENT_ID=your_client_id_here
+MAL_CLIENT_SECRET=your_client_secret_here
+MAL_REDIRECT_URI=http://localhost:3000/api/v1/mal/callback
+```
+
+Untuk production di Vercel:
+```env
+MAL_REDIRECT_URI=https://your-domain.vercel.app/api/v1/mal/callback
+```
+
+### 3. Update Redirect URI di MAL
+
+Jika deploy ke Vercel, update **App Redirect URL** di [MAL API Config](https://myanimelist.net/apiconfig) dengan URL production kamu.
+
+### Flow Login Lengkap
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        LOGIN FLOW                               │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. Frontend ──────────► /api/v1/mal/auth                      │
+│                          ↓                                      │
+│                          Returns authorization_url              │
+│                          ↓                                      │
+│  2. Redirect user ─────► myanimelist.net/v1/oauth2/authorize   │
+│                          ↓                                      │
+│                          User login & authorize                 │
+│                          ↓                                      │
+│  3. MAL redirect ──────► /api/v1/mal/callback?code=...&state=..│
+│                          ↓                                      │
+│                          Exchange code for token                │
+│                          ↓                                      │
+│  4. Return tokens ─────► access_token + refresh_token          │
+│                          ↓                                      │
+│  5. Save tokens ───────► localStorage / database               │
+│                          ↓                                      │
+│  6. Use tokens ────────► Authorization: Bearer {access_token}  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Contoh Complete Implementation
+
+**HTML (index.html):**
+```html
+<button id="loginBtn">Login dengan MyAnimeList</button>
+<div id="userInfo" style="display: none;">
+  <img id="userPic" src="" alt="Profile Picture" width="50">
+  <span id="userName"></span>
+  <button id="logoutBtn">Logout</button>
+</div>
+
+<script>
+const API_URL = 'http://localhost:3000/api/v1';
+
+// Check if already logged in
+const accessToken = localStorage.getItem('mal_access_token');
+if (accessToken) {
+  showUserInfo();
+}
+
+// Login button
+document.getElementById('loginBtn').addEventListener('click', async () => {
+  const res = await fetch(`${API_URL}/mal/auth`);
+  const data = await res.json();
+  window.location.href = data.data.authorization_url;
+});
+
+// Handle callback (jika halaman ini adalah callback page)
+const urlParams = new URLSearchParams(window.location.search);
+const code = urlParams.get('code');
+const state = urlParams.get('state');
+
+if (code && state) {
+  handleCallback(code, state);
+}
+
+async function handleCallback(code, state) {
+  const res = await fetch(`${API_URL}/mal/callback?code=${code}&state=${state}`);
+  const data = await res.json();
+  
+  if (data.success) {
+    localStorage.setItem('mal_access_token', data.data.token.access_token);
+    localStorage.setItem('mal_refresh_token', data.data.token.refresh_token);
+    localStorage.setItem('mal_user', JSON.stringify(data.data.user));
+    
+    // Clear URL params
+    window.history.replaceState({}, document.title, window.location.pathname);
+    
+    showUserInfo();
+  }
+}
+
+async function showUserInfo() {
+  const user = JSON.parse(localStorage.getItem('mal_user'));
+  
+  document.getElementById('loginBtn').style.display = 'none';
+  document.getElementById('userInfo').style.display = 'block';
+  document.getElementById('userPic').src = user.picture || '';
+  document.getElementById('userName').textContent = user.name;
+}
+
+// Logout
+document.getElementById('logoutBtn').addEventListener('click', () => {
+  localStorage.removeItem('mal_access_token');
+  localStorage.removeItem('mal_refresh_token');
+  localStorage.removeItem('mal_user');
+  window.location.reload();
+});
+</script>
+```
+
+---
+
 ## 🔗 Related Documentation
 
 - [SCHEDULE_API.md](./SCHEDULE_API.md) - Dokumentasi detail untuk Schedule API
@@ -890,4 +1919,6 @@ Jika ada pertanyaan atau masalah, silakan buat issue di repository GitHub.
 **Last Updated**: 2025-01-05  
 **API Version**: 1.0.0  
 **Author**: Raisyahah
+
+
 

@@ -6,6 +6,7 @@ const compression = require('compression');
 const morgan = require('morgan');
 const NodeCache = require('node-cache');
 const scraper = require('./api/scraper');
+const mal = require('./api/myanimelist');
 const path = require('path');
 
 const app = express();
@@ -1039,6 +1040,459 @@ app.get('/api/v1/episode/', handleEndpoint(async (req, res) => {
   }
 }));
 
+// ==========================================
+// MyAnimeList API Routes
+// ==========================================
+
+// MAL: Get authorization URL (untuk login)
+app.get('/api/v1/mal/auth', asyncHandler(async (req, res) => {
+  try {
+    const { state } = req.query;
+    const authData = mal.getAuthorizationUrl(state);
+    
+    res.json({
+      success: true,
+      data: {
+        authorization_url: authData.url,
+        state: authData.state,
+        message: 'Redirect user ke authorization_url untuk login MyAnimeList'
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+}));
+
+// MAL: OAuth2 Callback (setelah user login)
+app.get('/api/v1/mal/callback', asyncHandler(async (req, res) => {
+  try {
+    const { code, state, error: authError } = req.query;
+    
+    if (authError) {
+      return res.status(400).json({
+        success: false,
+        error: `OAuth error: ${authError}`
+      });
+    }
+    
+    if (!code || !state) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing code atau state parameter'
+      });
+    }
+    
+    // Exchange code untuk token
+    const tokenData = await mal.exchangeCodeForToken(code, state);
+    
+    // Get user profile untuk mendapatkan user ID
+    const userProfile = await mal.getUserProfile(tokenData.access_token);
+    
+    // Simpan token (dalam production, simpan ke database)
+    mal.saveUserToken(userProfile.id, tokenData);
+    
+    res.json({
+      success: true,
+      data: {
+        user: userProfile,
+        token: {
+          access_token: tokenData.access_token,
+          refresh_token: tokenData.refresh_token,
+          expires_in: tokenData.expires_in,
+          expires_at: tokenData.expires_at
+        },
+        message: 'Login berhasil! Simpan token ini untuk request selanjutnya'
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+}));
+
+// MAL: Refresh token
+app.post('/api/v1/mal/refresh', asyncHandler(async (req, res) => {
+  try {
+    const { refresh_token } = req.body;
+    
+    if (!refresh_token) {
+      return res.status(400).json({
+        success: false,
+        error: 'refresh_token diperlukan'
+      });
+    }
+    
+    const tokenData = await mal.refreshAccessToken(refresh_token);
+    
+    res.json({
+      success: true,
+      data: {
+        access_token: tokenData.access_token,
+        refresh_token: tokenData.refresh_token,
+        expires_in: tokenData.expires_in,
+        expires_at: tokenData.expires_at
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+}));
+
+// MAL: Get user profile
+app.get('/api/v1/mal/user', asyncHandler(async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authorization header diperlukan (Bearer token)'
+      });
+    }
+    
+    const accessToken = authHeader.split(' ')[1];
+    const userProfile = await mal.getUserProfile(accessToken);
+    
+    res.json({
+      success: true,
+      data: userProfile
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+}));
+
+// MAL: Get user anime list (bookmark)
+app.get('/api/v1/mal/animelist', asyncHandler(async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authorization header diperlukan (Bearer token)'
+      });
+    }
+    
+    const accessToken = authHeader.split(' ')[1];
+    const { status, sort, limit, offset } = req.query;
+    
+    const animeList = await mal.getUserAnimeList(
+      accessToken,
+      status || null,
+      sort || 'list_updated_at',
+      parseInt(limit) || 100,
+      parseInt(offset) || 0
+    );
+    
+    // Hitung statistik
+    const stats = {
+      total: animeList.data.length,
+      watching: animeList.data.filter(a => a.list_status.status === 'watching').length,
+      completed: animeList.data.filter(a => a.list_status.status === 'completed').length,
+      on_hold: animeList.data.filter(a => a.list_status.status === 'on_hold').length,
+      dropped: animeList.data.filter(a => a.list_status.status === 'dropped').length,
+      plan_to_watch: animeList.data.filter(a => a.list_status.status === 'plan_to_watch').length,
+      total_episodes_watched: animeList.data.reduce((sum, a) => sum + a.list_status.num_episodes_watched, 0)
+    };
+    
+    res.json({
+      success: true,
+      data: {
+        stats: stats,
+        anime_list: animeList.data,
+        paging: animeList.paging
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+}));
+
+// MAL: Get anime detail
+app.get('/api/v1/mal/anime/:id', asyncHandler(async (req, res) => {
+  try {
+    const { id } = req.params;
+    const authHeader = req.headers.authorization;
+    const accessToken = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
+    
+    const animeDetail = await mal.getAnimeDetail(id, accessToken);
+    
+    res.json({
+      success: true,
+      data: animeDetail
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+}));
+
+// MAL: Search anime
+app.get('/api/v1/mal/search', asyncHandler(async (req, res) => {
+  try {
+    const { q, limit } = req.query;
+    
+    if (!q) {
+      return res.status(400).json({
+        success: false,
+        error: 'Parameter q (query) diperlukan'
+      });
+    }
+    
+    const authHeader = req.headers.authorization;
+    const accessToken = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
+    
+    const searchResult = await mal.searchAnime(q, parseInt(limit) || 10, accessToken);
+    
+    res.json({
+      success: true,
+      data: searchResult.data,
+      paging: searchResult.paging,
+      query: q
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+}));
+
+// MAL: Get anime ranking
+app.get('/api/v1/mal/ranking', asyncHandler(async (req, res) => {
+  try {
+    const { type, limit, offset } = req.query;
+    const authHeader = req.headers.authorization;
+    const accessToken = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
+    
+    const rankingResult = await mal.getAnimeRanking(
+      type || 'all',
+      parseInt(limit) || 10,
+      parseInt(offset) || 0,
+      accessToken
+    );
+    
+    res.json({
+      success: true,
+      data: rankingResult.data,
+      paging: rankingResult.paging,
+      ranking_type: type || 'all'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+}));
+
+// MAL: Get seasonal anime
+app.get('/api/v1/mal/season/:year/:season', asyncHandler(async (req, res) => {
+  try {
+    const { year, season } = req.params;
+    const { sort, limit, offset } = req.query;
+    const authHeader = req.headers.authorization;
+    const accessToken = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
+    
+    // Validasi season
+    const validSeasons = ['winter', 'spring', 'summer', 'fall'];
+    if (!validSeasons.includes(season.toLowerCase())) {
+      return res.status(400).json({
+        success: false,
+        error: `Season tidak valid. Gunakan: ${validSeasons.join(', ')}`
+      });
+    }
+    
+    const seasonalResult = await mal.getSeasonalAnime(
+      parseInt(year),
+      season.toLowerCase(),
+      sort || 'anime_score',
+      parseInt(limit) || 10,
+      parseInt(offset) || 0,
+      accessToken
+    );
+    
+    res.json({
+      success: true,
+      season: seasonalResult.season,
+      data: seasonalResult.data,
+      paging: seasonalResult.paging
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+}));
+
+// MAL: Update anime list status (add/update bookmark)
+app.patch('/api/v1/mal/animelist/:animeId', asyncHandler(async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authorization header diperlukan (Bearer token)'
+      });
+    }
+    
+    const accessToken = authHeader.split(' ')[1];
+    const { animeId } = req.params;
+    const { status, score, num_episodes_watched } = req.body;
+    
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        error: 'Parameter status diperlukan (watching, completed, on_hold, dropped, plan_to_watch)'
+      });
+    }
+    
+    const result = await mal.updateAnimeListStatus(
+      accessToken,
+      animeId,
+      status,
+      score || null,
+      num_episodes_watched || null
+    );
+    
+    res.json({
+      success: true,
+      data: result,
+      message: 'Anime list berhasil diupdate'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+}));
+
+// MAL: Delete anime dari list
+app.delete('/api/v1/mal/animelist/:animeId', asyncHandler(async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authorization header diperlukan (Bearer token)'
+      });
+    }
+    
+    const accessToken = authHeader.split(' ')[1];
+    const { animeId } = req.params;
+    
+    const result = await mal.deleteAnimeFromList(accessToken, animeId);
+    
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+}));
+
+// MAL: Sync bookmark - Get full anime list dengan video dari animeinweb
+app.get('/api/v1/mal/sync', asyncHandler(async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authorization header diperlukan (Bearer token)'
+      });
+    }
+    
+    const accessToken = authHeader.split(' ')[1];
+    const { status } = req.query;
+    
+    // Ambil anime list dari MAL
+    const malAnimeList = await mal.getUserAnimeList(
+      accessToken,
+      status || null,
+      'list_updated_at',
+      1000, // Max
+      0
+    );
+    
+    // Untuk setiap anime, coba cari di animeinweb berdasarkan title
+    const syncedList = [];
+    
+    for (const malAnime of malAnimeList.data) {
+      const syncedAnime = {
+        // Data dari MAL
+        mal_id: malAnime.mal_id,
+        title: malAnime.title,
+        synopsis: malAnime.synopsis,
+        mean_score: malAnime.mean_score,
+        genres: malAnime.genres,
+        studios: malAnime.studios,
+        status: malAnime.status,
+        num_episodes: malAnime.num_episodes,
+        start_date: malAnime.start_date,
+        end_date: malAnime.end_date,
+        start_season: malAnime.start_season,
+        broadcast: malAnime.broadcast,
+        media_type: malAnime.media_type,
+        rating: malAnime.rating,
+        main_picture: malAnime.main_picture,
+        // User status dari MAL
+        list_status: malAnime.list_status,
+        // Placeholder untuk data dari animeinweb (video, episodes)
+        animeinweb_id: null,
+        has_video: false
+      };
+      
+      syncedList.push(syncedAnime);
+    }
+    
+    // Hitung statistik
+    const stats = {
+      total: syncedList.length,
+      watching: syncedList.filter(a => a.list_status.status === 'watching').length,
+      completed: syncedList.filter(a => a.list_status.status === 'completed').length,
+      on_hold: syncedList.filter(a => a.list_status.status === 'on_hold').length,
+      dropped: syncedList.filter(a => a.list_status.status === 'dropped').length,
+      plan_to_watch: syncedList.filter(a => a.list_status.status === 'plan_to_watch').length,
+      total_episodes_watched: syncedList.reduce((sum, a) => sum + a.list_status.num_episodes_watched, 0)
+    };
+    
+    res.json({
+      success: true,
+      data: {
+        stats: stats,
+        anime_list: syncedList,
+        message: 'Data anime dari MAL. Gunakan endpoint /api/v1/animeinweb untuk video streaming.'
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+}));
+
 // Start server
 if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
   app.listen(PORT, () => {
@@ -1057,7 +1511,20 @@ if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
     console.log(`   GET /api/v1/animeinweb/new - Anime baru ditambahkan`);
     console.log(`   GET /api/v1/animeinweb/today - Anime hari ini`);
     console.log(`   GET /api/v1/download/episode?animeId=...&episodeNumber=...&resolution=... - Download link per episode`);
-    console.log(`   GET /api/v1/download/batch?animeId=...&resolution=...&startEpisode=...&endEpisode=... - Download link batch\n`);
+    console.log(`   GET /api/v1/download/batch?animeId=...&resolution=...&startEpisode=...&endEpisode=... - Download link batch`);
+    console.log(`\n📖 MyAnimeList Endpoints:`);
+    console.log(`   GET /api/v1/mal/auth - Get authorization URL untuk login`);
+    console.log(`   GET /api/v1/mal/callback - OAuth2 callback`);
+    console.log(`   POST /api/v1/mal/refresh - Refresh access token`);
+    console.log(`   GET /api/v1/mal/user - Get user profile (perlu Bearer token)`);
+    console.log(`   GET /api/v1/mal/animelist - Get user anime list/bookmark (perlu Bearer token)`);
+    console.log(`   GET /api/v1/mal/anime/:id - Get anime detail dari MAL`);
+    console.log(`   GET /api/v1/mal/search?q=... - Search anime di MAL`);
+    console.log(`   GET /api/v1/mal/ranking?type=... - Get anime ranking`);
+    console.log(`   GET /api/v1/mal/season/:year/:season - Get seasonal anime`);
+    console.log(`   PATCH /api/v1/mal/animelist/:animeId - Update anime list (perlu Bearer token)`);
+    console.log(`   DELETE /api/v1/mal/animelist/:animeId - Delete dari list (perlu Bearer token)`);
+    console.log(`   GET /api/v1/mal/sync - Sync bookmark dengan data MAL (perlu Bearer token)\n`);
   });
 }
 
