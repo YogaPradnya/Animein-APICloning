@@ -327,28 +327,61 @@ async function getAnimeDetail(urlOrSlug) {
 }
 
 // Cari anime berdasarkan keyword/judul (menggunakan API internal animeinweb.com)
-async function searchAnime(keyword) {
+/**
+ * Search anime dengan filter genre dan sorting
+ * @param {Object} options - Opsi pencarian
+ * @param {string} options.keyword - Kata kunci pencarian (opsional)
+ * @param {string} options.genre - Filter genre ID (opsional)
+ * @param {string} options.sort - Sorting: 'views' | 'title' | 'newest' | 'favorites' (default: 'views')
+ * @param {number} options.page - Halaman (default: 0)
+ * @returns {Promise<Object>} Hasil pencarian dengan pagination info
+ */
+async function searchAnime(options = {}) {
   try {
-    if (!keyword || keyword.trim().length === 0) {
-      throw new Error('Keyword pencarian tidak boleh kosong');
+    // Support both old format (string keyword) and new format (object options)
+    let keyword = '';
+    let genre = null;
+    let sort = 'views';
+    let page = 0;
+    
+    if (typeof options === 'string') {
+      // Format lama: searchAnime('keyword')
+      keyword = options;
+    } else {
+      // Format baru: searchAnime({ keyword, genre, sort, page })
+      keyword = options.keyword || '';
+      genre = options.genre || null;
+      sort = options.sort || 'views';
+      page = options.page || 0;
     }
     
-    console.log(`Searching anime dengan keyword: ${keyword}`);
+    console.log(`Searching anime - keyword: "${keyword}", genre: ${genre}, sort: ${sort}, page: ${page}`);
     
-    // Gunakan API internal animeinweb.com untuk search
-    const searchApiUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/explore/movie?page=0&sort=views&keyword=${encodeURIComponent(keyword)}`;
+    // Build URL dengan parameter
+    let searchApiUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/explore/movie?page=${page}&sort=${sort}&keyword=${encodeURIComponent(keyword)}`;
+    
+    // Tambahkan filter genre jika ada
+    if (genre) {
+      searchApiUrl += `&genre_in=${genre}`;
+    }
+    
     console.log(`Fetching from API: ${searchApiUrl}`);
     
-    const response = await axios.get(searchApiUrl);
+    const response = await axios.get(searchApiUrl, {
+      timeout: 15000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json',
+        'Referer': `${ANIMEINWEB_URL}/search`
+      }
+    });
     const apiData = response.data;
     
-    if (!apiData || apiData.error || !apiData.data || !apiData.data.movie) {
-      console.log('No results from API, trying fallback...');
-      // Coba fallback dengan scraping jika API tidak ada hasil
+    if (!apiData || apiData.error) {
       throw new Error('Tidak ada hasil dari API, coba lagi atau gunakan keyword yang berbeda');
     }
     
-    const movies = apiData.data.movie;
+    const movies = apiData.data?.movie || [];
     const results = [];
     
     movies.forEach(movie => {
@@ -364,8 +397,8 @@ async function searchAnime(keyword) {
         status: (movie.status || '').toLowerCase(),
         year: movie.year || '',
         day: movie.day || '',
-        views: movie.views || '0',
-        favorites: movie.favorites || '0',
+        views: parseInt(movie.views) || 0,
+        favorites: parseInt(movie.favorites) || 0,
         genres: genres,
         poster: movie.image_poster || '',
         cover: movie.image_cover || '',
@@ -375,11 +408,162 @@ async function searchAnime(keyword) {
       });
     });
     
-    console.log(`✅ Found ${results.length} results for "${keyword}"`);
-    return results;
+    // Sorting lokal jika sort adalah 'title' (API mungkin tidak support sort by title)
+    if (sort === 'title') {
+      results.sort((a, b) => a.title.localeCompare(b.title));
+    } else if (sort === 'favorites') {
+      results.sort((a, b) => b.favorites - a.favorites);
+    }
+    
+    console.log(`✅ Found ${results.length} results for "${keyword}" (genre: ${genre}, sort: ${sort})`);
+    
+    return {
+      results: results,
+      pagination: {
+        currentPage: page,
+        hasNextPage: results.length >= 60, // Biasanya API return max 60 per page
+        totalResults: results.length
+      },
+      filters: {
+        keyword: keyword,
+        genre: genre,
+        sort: sort
+      }
+    };
   } catch (error) {
     console.error('Error searching anime:', error);
     throw new Error(`Gagal mencari anime: ${error.message}`);
+  }
+}
+
+/**
+ * Mendapatkan daftar genre yang tersedia
+ * @returns {Promise<Array>} List genre dengan id dan nama
+ */
+async function getGenres() {
+  try {
+    console.log('Fetching genre list...');
+    
+    const genreApiUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/explore/genre`;
+    
+    const response = await axios.get(genreApiUrl, {
+      timeout: 10000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json'
+      }
+    });
+    
+    const apiData = response.data;
+    
+    if (!apiData || !apiData.data) {
+      throw new Error('Gagal mengambil data genre');
+    }
+    
+    // Parse genre list
+    const genres = apiData.data.map(g => ({
+      id: g.id,
+      name: (g.name || g.genre || '').toLowerCase(),
+      count: g.count || 0
+    }));
+    
+    // Sort by name
+    genres.sort((a, b) => a.name.localeCompare(b.name));
+    
+    console.log(`✅ Found ${genres.length} genres`);
+    
+    return genres;
+  } catch (error) {
+    console.error('Error fetching genres:', error);
+    // Return default genres jika API gagal
+    return [
+      { id: 14, name: 'action', count: 0 },
+      { id: 1, name: 'adventure', count: 0 },
+      { id: 2, name: 'comedy', count: 0 },
+      { id: 3, name: 'demon', count: 0 },
+      { id: 4, name: 'drama', count: 0 },
+      { id: 5, name: 'ecchi', count: 0 },
+      { id: 6, name: 'fantasy', count: 0 },
+      { id: 7, name: 'game', count: 0 },
+      { id: 8, name: 'harem', count: 0 },
+      { id: 9, name: 'historical', count: 0 },
+      { id: 10, name: 'horror', count: 0 },
+      { id: 11, name: 'magic', count: 0 },
+      { id: 12, name: 'martial arts', count: 0 },
+      { id: 13, name: 'mecha', count: 0 },
+      { id: 15, name: 'military', count: 0 },
+      { id: 16, name: 'music', count: 0 },
+      { id: 17, name: 'mystery', count: 0 },
+      { id: 18, name: 'parody', count: 0 },
+      { id: 19, name: 'psychological', count: 0 },
+      { id: 20, name: 'romance', count: 0 },
+      { id: 21, name: 'school', count: 0 },
+      { id: 22, name: 'sci-fi', count: 0 },
+      { id: 23, name: 'seinen', count: 0 },
+      { id: 24, name: 'shoujo', count: 0 },
+      { id: 25, name: 'shoujo ai', count: 0 },
+      { id: 26, name: 'shounen', count: 0 },
+      { id: 27, name: 'shounen ai', count: 0 },
+      { id: 28, name: 'slice of life', count: 0 },
+      { id: 29, name: 'sports', count: 0 },
+      { id: 30, name: 'super power', count: 0 },
+      { id: 31, name: 'supernatural', count: 0 },
+      { id: 32, name: 'thriller', count: 0 },
+      { id: 33, name: 'tokusatsu', count: 0 }
+    ];
+  }
+}
+
+/**
+ * Mendapatkan info batch download dengan pembagian 25 episode per pack
+ * @param {string} animeId - ID anime
+ * @returns {Promise<Object>} Info batch dengan pembagian episode
+ */
+async function getBatchDownloadInfo(animeId) {
+  try {
+    console.log(`Getting batch download info for anime: ${animeId}`);
+    
+    // Ambil data anime untuk mendapatkan list episode
+    const animeData = await getAnimeInWebData(animeId);
+    
+    if (!animeData || !animeData.episodes || animeData.episodes.length === 0) {
+      throw new Error('Episode list tidak ditemukan untuk anime ini');
+    }
+    
+    const totalEpisodes = animeData.episodes.length;
+    const packSize = 25; // 25 episode per pack
+    const batches = [];
+    
+    // Buat pembagian batch per 25 episode
+    for (let i = 0; i < totalEpisodes; i += packSize) {
+      const startEp = i + 1;
+      const endEp = Math.min(i + packSize, totalEpisodes);
+      const packNumber = Math.floor(i / packSize) + 1;
+      
+      batches.push({
+        packNumber: packNumber,
+        label: `Pack ${packNumber}: Episode ${startEp}-${endEp}`,
+        startEpisode: startEp,
+        endEpisode: endEp,
+        episodeCount: endEp - startEp + 1,
+        downloadUrl: `/api/v1/download/batch?animeId=${animeId}&startEpisode=${startEp}&endEpisode=${endEp}`
+      });
+    }
+    
+    console.log(`✅ Created ${batches.length} batch packs for ${totalEpisodes} episodes`);
+    
+    return {
+      animeId: animeId,
+      animeTitle: animeData.title,
+      totalEpisodes: totalEpisodes,
+      packSize: packSize,
+      totalPacks: batches.length,
+      resolutions: ['1080p', '720p', '480p', '360p'],
+      batches: batches
+    };
+  } catch (error) {
+    console.error('Error getting batch download info:', error);
+    throw new Error(`Gagal mengambil info batch download: ${error.message}`);
   }
 }
 
@@ -2652,6 +2836,8 @@ module.exports = {
   getSchedule,
   getTrending,
   getNew,
-  getToday
+  getToday,
+  getGenres,
+  getBatchDownloadInfo
 };
 
