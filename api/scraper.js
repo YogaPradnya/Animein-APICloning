@@ -1880,38 +1880,60 @@ async function getScheduleFromAPI(day = null) {
     const data = { currentDay: dayNames[targetDay] || 'HARI INI', schedule: [] };
     const seenIds = new Set();
     
-    // Jika hari spesifik diminta, ambil dari API schedule
+    // SELALU ambil dari API schedule untuk hari spesifik (jangan fallback ke explore API)
     if (targetDay && targetDay !== 'RANDOM') {
       console.log(`[Schedule API] Fetching schedule for day: ${targetDay}`);
       const scheduleUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/schedule/data?day=${targetDay}`;
       
       try {
         const response = await axios.get(scheduleUrl, { 
-          timeout: 15000,
+          timeout: 20000,
           headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'application/json',
-            'Referer': `${ANIMEINWEB_URL}/schedule`
+            'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Referer': `${ANIMEINWEB_URL}/schedule`,
+            'Origin': ANIMEINWEB_URL
           }
         });
         
-        if (response.data && response.data.data) {
-          const scheduleData = response.data.data;
+        console.log(`[Schedule API] Response status: ${response.status} for ${targetDay}`);
+        
+        if (response.data) {
+          // Cek struktur response
+          let scheduleData = null;
+          if (response.data.data) {
+            scheduleData = response.data.data;
+          } else if (Array.isArray(response.data)) {
+            scheduleData = response.data;
+          } else {
+            scheduleData = response.data;
+          }
           
           // Data bisa berupa array langsung atau object dengan property movie/schedule
           let movies = [];
           if (Array.isArray(scheduleData)) {
             movies = scheduleData;
-          } else if (scheduleData.movie) {
+          } else if (scheduleData && scheduleData.movie) {
             movies = scheduleData.movie;
-          } else if (scheduleData.schedule) {
+          } else if (scheduleData && scheduleData.schedule) {
             movies = scheduleData.schedule;
+          } else if (scheduleData && typeof scheduleData === 'object') {
+            // Coba iterate keys untuk cari array
+            for (const key of Object.keys(scheduleData)) {
+              if (Array.isArray(scheduleData[key])) {
+                movies = scheduleData[key];
+                break;
+              }
+            }
           }
           
           console.log(`[Schedule API] Found ${movies.length} anime for ${targetDay}`);
           
+          // Karena endpoint sudah memfilter per hari, kita percaya semua data yang dikembalikan
           movies.forEach(movie => {
             const animeId = movie.id || movie.anime_id || movie.movie_id;
+            
             if (animeId && !seenIds.has(animeId)) {
               seenIds.add(animeId);
               const genres = movie.genre ? movie.genre.split(',').map(g => g.trim().toLowerCase()) : [];
@@ -1931,15 +1953,24 @@ async function getScheduleFromAPI(day = null) {
               });
             }
           });
+          
+          // Log untuk debugging
+          if (data.schedule.length > 0) {
+            console.log(`[Schedule API] Successfully processed ${data.schedule.length} anime for ${targetDay}`);
+          } else if (movies.length > 0) {
+            console.log(`[Schedule API] Warning: Found ${movies.length} movies but processed 0 (check parsing logic)`);
+          }
         }
       } catch (apiError) {
-        console.log(`[Schedule API] Error fetching ${targetDay}:`, apiError.message);
+        console.error(`[Schedule API] Error fetching ${targetDay}:`, apiError.message);
+        console.error(`[Schedule API] Error details:`, apiError.response?.status, apiError.response?.statusText);
+        // JANGAN fallback ke explore API, return empty array saja
+        // Ini untuk memastikan setiap hari punya data yang berbeda
+        return data;
       }
-    }
-    
-    // Jika tidak ada data atau request RANDOM, fallback ke API explore
-    if (data.schedule.length === 0) {
-      console.log('[Schedule API] No data from schedule API, falling back to explore API...');
+    } else if (targetDay === 'RANDOM') {
+      // Untuk RANDOM, ambil dari explore API
+      console.log('[Schedule API] Fetching random anime from explore API...');
       const exploreUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/explore/movie?page=0&sort=update&keyword=`;
       const exploreResponse = await axios.get(exploreUrl, { timeout: 10000 });
       
@@ -1966,14 +1997,10 @@ async function getScheduleFromAPI(day = null) {
             });
           }
         });
-        
-        if (!targetDay) {
-          data.currentDay = 'TERBARU';
-        }
       }
     }
     
-    console.log(`[Schedule API] Total found: ${data.schedule.length} anime`);
+    console.log(`[Schedule API] Total found: ${data.schedule.length} anime for ${data.currentDay}`);
     return data;
     
   } catch (error) {
