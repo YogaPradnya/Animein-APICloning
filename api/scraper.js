@@ -13,6 +13,15 @@ const httpsAgent = new https.Agent({
 const BASE_URL = process.env.BASE_URL;
 const ANIMEINWEB_URL = process.env.ANIMEINWEB_URL;
 
+// Common Headers untuk request ke animeinweb (menghindari blokir Cloudflare/WAF)
+const API_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Accept": "application/json",
+  "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+  "Referer": `${ANIMEINWEB_URL}/`,
+  "Origin": ANIMEINWEB_URL,
+};
+
 // Fungsi untuk scrape dengan Playwright (hanya fallback jika benar-benar butuh)
 async function scrapeWithPlaywright(url) {
   // DI VERCEL: Gunakan axios sebagai pengganti karena playwright terlalu berat
@@ -155,12 +164,7 @@ async function searchAnime(options = {}) {
     const response = await axios.get(searchApiUrl, {
       timeout: 15000,
       httpsAgent: httpsAgent,
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        Accept: "application/json",
-        Referer: `${ANIMEINWEB_URL}/search`,
-      },
+      headers: API_HEADERS
     });
     const apiData = response.data;
 
@@ -242,11 +246,7 @@ async function getGenres() {
     const response = await axios.get(genreApiUrl, {
       timeout: 10000,
       httpsAgent: httpsAgent,
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        Accept: "application/json",
-      },
+      headers: API_HEADERS
     });
 
     const apiData = response.data;
@@ -1630,6 +1630,7 @@ async function getAnimeInWebData(animeIdOrUrl) {
     try {
       const detailResponse = await axios.get(detailApiUrl, { 
         httpsAgent: httpsAgent,
+        headers: API_HEADERS,
         timeout: 15000 
       });
       detailData = detailResponse.data;
@@ -1822,6 +1823,8 @@ async function getAnimeInWebEpisode(animeId, episodeNumber) {
         console.log(`Searching episode in page ${page}: ${episodeListUrl}`);
         const episodeListResponse = await axios.get(episodeListUrl, {
           timeout: 10000,
+          httpsAgent: httpsAgent,
+          headers: API_HEADERS
         });
         const episodeListData = episodeListResponse.data;
 
@@ -2911,7 +2914,8 @@ async function getTrending() {
     try {
       const response = await axios.get(apiUrl, { 
         timeout: 15000,
-        httpsAgent: httpsAgent 
+        httpsAgent: httpsAgent,
+        headers: API_HEADERS
       });
       apiData = response.data;
     } catch (e) {
@@ -2950,6 +2954,7 @@ async function getTrending() {
 // Fallback scraping jika API gagal
 async function getTrendingFallback() {
   try {
+    if (process.env.VERCEL) return []; // Skip browser on Vercel
     const browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
 
@@ -3030,7 +3035,8 @@ async function getNew() {
     try {
       const response = await axios.get(apiUrl, {
         timeout: 15000,
-        httpsAgent: httpsAgent
+        httpsAgent: httpsAgent,
+        headers: API_HEADERS
       });
       apiData = response.data;
     } catch (e) {
@@ -3067,6 +3073,7 @@ async function getNew() {
 // Fallback scraping jika API gagal
 async function getNewFallback() {
   try {
+    if (process.env.VERCEL) return []; // Skip browser on Vercel
     const browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
 
