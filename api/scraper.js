@@ -52,368 +52,59 @@ async function scrapeWithAxios(url) {
 }
 
 // Ambil episode terbaru - Ambil SEMUA data yang ada
+// Ambil episode terbaru - Menggunakan API AnimeInWeb (Get New Anime)
 async function getLatestEpisodes() {
   try {
-    const $ = await scrapeWithPlaywright(`${BASE_URL}/`);
-    const episodes = [];
-    const seenLinks = new Set(); // Untuk avoid duplicate
-
-    // Cari semua card episode terbaru dengan berbagai selector yang mungkin
-    // JANGAN break, ambil SEMUA data dari semua selector
-    const selectors = [
-      ".episode-item",
-      ".latest-episode",
-      ".episode-card",
-      ".episode",
-      '[class*="episode"]',
-      '[class*="latest"]',
-      ".item",
-      ".card",
-      "article",
-      ".post",
-      ".entry",
-      "li",
-      'div[class*="ep"]',
-      "[data-episode]",
-    ];
-
-    // Coba setiap selector - JANGAN break, ambil semua
-    for (const selector of selectors) {
-      $(selector).each((i, elem) => {
-        try {
-          const $elem = $(elem);
-
-          // Cari link dulu (penting untuk deduplication)
-          let link =
-            $elem.find("a").first().attr("href") ||
-            $elem.closest("a").attr("href") ||
-            $elem.attr("href");
-
-          if (link) {
-            link = helpers.normalizeUrl(link, BASE_URL);
-            // Skip jika sudah ada
-            if (seenLinks.has(link)) return;
-            seenLinks.add(link);
-          }
-
-          // Cari title dengan berbagai cara
-          let title = $elem
-            .find('h1, h2, h3, h4, h5, .title, [class*="title"], a')
-            .first()
-            .text()
-            .trim();
-
-          // Jika title kosong, coba ambil dari text content
-          if (!title || title.length < 3) {
-            const allText = $elem.text().trim();
-            const lines = allText
-              .split("\n")
-              .map((l) => l.trim())
-              .filter((l) => l.length > 0);
-            title =
-              lines.find(
-                (l) =>
-                  l.length > 3 &&
-                  !l.match(
-                    /^(home|about|contact|login|register|menu|search)$/i,
-                  ),
-              ) ||
-              lines[0] ||
-              allText.substring(0, 100).trim();
-          }
-
-          // Skip jika title tidak valid
-          if (
-            !title ||
-            title.length < 2 ||
-            title.match(
-              /^(home|about|contact|login|register|menu|search|next|previous)$/i,
-            )
-          ) {
-            return;
-          }
-
-          // Extract episode number dengan helper (return number, bukan string)
-          const episodeNum = helpers.extractEpisodeNumber(title, link);
-          const episode = episodeNum
-            ? `episode ${episodeNum}`
-            : "episode unknown";
-
-          // Extract anime slug dari link
-          const animeSlug = helpers.extractAnimeSlug(link);
-
-          // Extract anime title (clean title)
-          const animeTitle = helpers.extractAnimeTitle(title, link);
-
-          // Generate link episode sesuai format website jika belum ada atau perlu diperbaiki
-          let episodeLink = link;
-          if (animeSlug && episodeNum && (!link || link.includes("/anime/"))) {
-            // Generate link episode: /watari-kun-no-xx-ga-houkai-sunzen-episode-26/
-            episodeLink = helpers.generateEpisodeLink(
-              animeSlug,
-              episodeNum,
-              BASE_URL,
-            );
-          }
-
-          // Generate link anime detail jika belum ada
-          let animeLink = null;
-          if (animeSlug && !link.includes("/anime/")) {
-            animeLink = `${BASE_URL}/anime/${animeSlug}/`;
-          } else if (link && link.includes("/anime/")) {
-            animeLink = link;
-          }
-
-          // Extract thumbnail dengan helper
-          const thumbnail = helpers.extractThumbnail($elem, BASE_URL);
-
-          // Extract resolution dengan helper
-          const resolution = helpers.extractResolution($elem);
-
-          // Extract date dengan helper
-          const date = helpers.extractDate($elem);
-
-          // Buat episode object
-          const episodeData = {
-            title: animeTitle.toLowerCase() || title.toLowerCase(),
-            episode: episode.toLowerCase(),
-            thumbnail: thumbnail,
-            link: episodeLink, // Link ke halaman episode
-            animeLink: animeLink, // Link ke halaman detail anime
-            resolution: resolution,
-            releaseDate: date,
-            slug: animeSlug || null,
-          };
-
-          // Hanya tambahkan jika ada title atau link
-          if (episodeData.title || episodeData.link) {
-            episodes.push(episodeData);
-          }
-        } catch (err) {
-          // Skip jika error pada element ini
-          // console.error('Error processing element:', err);
-        }
-      });
-    }
-
-    // Fallback: cari semua link yang mengandung "episode" atau link ke anime
-    $('a[href*="episode"], a[href*="/anime/"]').each((i, elem) => {
-      try {
-        const $link = $(elem);
-        const href = $link.attr("href");
-        const text = $link.text().trim() || $link.find("img").attr("alt") || "";
-
-        if (href && (href.includes("episode") || href.includes("/anime/"))) {
-          const normalizedLink = helpers.normalizeUrl(href, BASE_URL);
-
-          if (!seenLinks.has(normalizedLink)) {
-            seenLinks.add(normalizedLink);
-
-            const episodeNum = helpers.extractEpisodeNumber(text, href);
-            const episode = episodeNum
-              ? `episode ${episodeNum}`
-              : "episode unknown";
-            const animeSlug = helpers.extractAnimeSlug(href);
-            const animeTitle = helpers.extractAnimeTitle(text, href);
-            const thumbnail = helpers.extractThumbnail($link, BASE_URL);
-
-            // Generate link episode jika perlu
-            let episodeLink = normalizedLink;
-            if (
-              animeSlug &&
-              episodeNum &&
-              (!normalizedLink || normalizedLink.includes("/anime/"))
-            ) {
-              episodeLink = helpers.generateEpisodeLink(
-                animeSlug,
-                episodeNum,
-                BASE_URL,
-              );
-            }
-
-            // Generate link anime detail
-            let animeLink = null;
-            if (animeSlug) {
-              animeLink = normalizedLink.includes("/anime/")
-                ? normalizedLink
-                : `${BASE_URL}/anime/${animeSlug}/`;
-            }
-
-            if (animeTitle || text) {
-              episodes.push({
-                title: animeTitle.toLowerCase() || text.toLowerCase(),
-                episode: episode.toLowerCase(),
-                thumbnail: thumbnail,
-                link: episodeLink, // Link ke halaman episode
-                animeLink: animeLink, // Link ke halaman detail anime
-                resolution: helpers.extractResolution($link),
-                releaseDate: helpers.extractDate($link),
-                slug: animeSlug || null,
-              });
-            }
-          }
-        }
-      } catch (err) {
-        // Skip error
-      }
-    });
-
-    // Remove duplicates berdasarkan link atau title+episode
-    const uniqueEpisodes = [];
-    const seen = new Set();
-
-    for (const ep of episodes) {
-      const key = ep.link || `${ep.title}-${ep.episode}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        uniqueEpisodes.push(ep);
-      }
-    }
-
-    console.log(`Found ${uniqueEpisodes.length} unique episodes`);
-
-    return uniqueEpisodes;
+    // Gunakan fungsi getNew() yang menggunakan API animeinweb (lebih stabil)
+    const newAnime = await getNew();
+    
+    // Map result agar sesuai dengan format yang diharapkan frontend
+    return newAnime.map(anime => ({
+      title: anime.title,
+      link: anime.link, // Link ke deskripsi anime
+      image: anime.thumbnail,
+      episode: "Baru", // Karena getNew return series, kita anggap ini episode baru
+      id: anime.animeId,
+      releaseDate: "Hari ini", 
+      slug: anime.animeId // Gunakan ID sebagai slug
+    }));
   } catch (error) {
     console.error("Error fetching latest episodes:", error);
-    throw new Error(`Gagal mengambil episode terbaru: ${error.message}`);
+    // Fallback empty array agar tidak 500
+    return [];
   }
 }
 
 // Ambil detail anime berdasarkan URL atau slug
 async function getAnimeDetail(urlOrSlug) {
   try {
-    const url = urlOrSlug.startsWith("http")
-      ? urlOrSlug
-      : `${BASE_URL}/${urlOrSlug}`;
-    const $ = await scrapeWithPlaywright(url);
-
-    const anime = {
-      title: "",
-      originalTitle: "",
-      synopsis: "",
-      rating: null,
-      releaseDate: "",
-      schedule: "",
-      studio: "",
-      genres: [],
-      episodes: [],
-      resolution: [],
-      thumbnail: "",
-      status: "",
-    };
-
-    // Extract judul
-    anime.title = $('h1, .anime-title, [class*="title"]')
-      .first()
-      .text()
-      .trim()
-      .toLowerCase();
-    anime.originalTitle =
-      $('.original-title, [class*="original"]').text().trim().toLowerCase() ||
-      anime.title;
-
-    // Extract sinopsis
-    anime.synopsis = $(
-      '.synopsis, .description, [class*="synopsis"], [class*="description"]',
-    )
-      .text()
-      .trim()
-      .toLowerCase();
-
-    // Extract rating
-    const ratingText = $('.rating, [class*="rating"]').text().trim();
-    anime.rating = parseFloat(ratingText) || null;
-
-    // Extract tanggal rilis
-    anime.releaseDate = $('.release-date, [data-release], [class*="release"]')
-      .text()
-      .trim()
-      .toLowerCase();
-
-    // Extract jadwal rilis
-    anime.schedule = $('.schedule, [class*="schedule"]')
-      .text()
-      .trim()
-      .toLowerCase();
-
-    // Extract studio
-    anime.studio = $('.studio, [class*="studio"]').text().trim().toLowerCase();
-
-    // Extract genre
-    $('.genre, .genres, [class*="genre"] a, [class*="tag"]').each((i, elem) => {
-      const genre = $(elem).text().trim().toLowerCase();
-      if (genre && !anime.genres.includes(genre)) {
-        anime.genres.push(genre);
+    // Cek apakah input adalah link AnimeInWeb atau ID numerik
+    const isAnimeInWeb = urlOrSlug.includes('animeinweb') || urlOrSlug.includes('animein.net') || /^\d+$/.test(urlOrSlug);
+    
+    if (isAnimeInWeb) {
+      // Extract ID jika URL
+      let id = urlOrSlug;
+      if (urlOrSlug.includes('/anime/')) {
+        const match = urlOrSlug.match(/\/anime\/(\d+)/);
+        if (match) id = match[1];
       }
-    });
-
-    // Extract thumbnail
-    anime.thumbnail =
-      $('.anime-thumbnail img, .poster img, [class*="thumbnail"] img')
-        .first()
-        .attr("src") ||
-      $('.anime-thumbnail img, .poster img, [class*="thumbnail"] img')
-        .first()
-        .attr("data-src") ||
-      "";
-    if (anime.thumbnail && !anime.thumbnail.startsWith("http")) {
-      anime.thumbnail = BASE_URL + anime.thumbnail;
+      return await getAnimeInWebData(id);
     }
 
-    // Extract status
-    anime.status = $('.status, [class*="status"]').text().trim().toLowerCase();
-
-    // Extract episode list
-    $('.episode-list .episode, [class*="episode-item"]').each((i, elem) => {
-      const $ep = $(elem);
-      const epNumber = $ep
-        .find('.ep-number, [class*="number"]')
-        .text()
-        .trim()
-        .toLowerCase();
-      const epTitle = $ep
-        .find('.ep-title, [class*="title"]')
-        .text()
-        .trim()
-        .toLowerCase();
-      const epLink = $ep.find("a").attr("href");
-      const epResolution = $ep
-        .find('.resolution, [class*="resolution"]')
-        .text()
-        .trim()
-        .toLowerCase();
-      const epDate = $ep
-        .find('.date, [class*="date"]')
-        .text()
-        .trim()
-        .toLowerCase();
-
-      if (epNumber || epTitle) {
-        anime.episodes.push({
-          number: epNumber,
-          title: epTitle,
-          link: epLink
-            ? epLink.startsWith("http")
-              ? epLink
-              : BASE_URL + epLink
-            : null,
-          resolution: epResolution || null,
-          releaseDate: epDate || null,
-        });
-      }
-    });
-
-    // Extract resolusi yang tersedia
-    $('.resolution-option, [class*="resolution"]').each((i, elem) => {
-      const res = $(elem).text().trim().toLowerCase();
-      if (res && !anime.resolution.includes(res)) {
-        anime.resolution.push(res);
-      }
-    });
-
-    return anime;
+    // Jika legacy slug (e.g. 'naruto-episode-1'), coba cari di AnimeInWeb via search
+    console.log(`Searching for legacy slug: ${urlOrSlug}`);
+    const searchResults = await searchAnime({ keyword: urlOrSlug.replace(/-/g, ' ') });
+    
+    if (searchResults && searchResults.results && searchResults.results.length > 0) {
+      // Ambil hasil pertama
+      const firstResult = searchResults.results[0];
+      console.log(`Found legacy match: ${firstResult.title} (ID: ${firstResult.id})`);
+      return await getAnimeInWebData(firstResult.id);
+    }
+    
+    throw new Error('Anime tidak ditemukan');
   } catch (error) {
-    console.error("Error fetching anime detail:", error);
+    console.error("Error getting anime detail:", error);
     throw error;
   }
 }
@@ -676,83 +367,54 @@ async function getBatchDownloadInfo(animeId) {
 // Ambil semua series/anime list
 async function getAnimeList(page = 1) {
   try {
-    const url = page > 1 ? `${BASE_URL}/page/${page}` : BASE_URL;
-    const $ = await scrapeWithPlaywright(url);
-    const animeList = [];
-
-    // Coba berbagai selector
-    const selectors = [
-      ".anime-item",
-      ".series-item",
-      ".anime-card",
-      '[class*="anime"]',
-      ".item",
-      ".card",
-      "article",
-      ".post",
-    ];
-
-    for (const selector of selectors) {
-      $(selector).each((i, elem) => {
-        const $elem = $(elem);
-
-        const title = $elem
-          .find('h1, h2, h3, h4, .title, [class*="title"], a')
-          .first()
-          .text()
-          .trim()
-          .toLowerCase();
-        const thumbnail =
-          $elem.find("img").first().attr("src") ||
-          $elem.find("img").first().attr("data-src") ||
-          $elem.find("img").first().attr("data-lazy-src");
-        const link =
-          $elem.find("a").first().attr("href") ||
-          $elem.closest("a").attr("href");
-        const rating = $elem
-          .find('.rating, [class*="rating"], .score')
-          .text()
-          .trim();
-        const status = $elem
-          .find('.status, [class*="status"]')
-          .text()
-          .trim()
-          .toLowerCase();
-
-        if (title && title.length > 2) {
-          animeList.push({
-            title: title,
-            thumbnail: thumbnail
-              ? thumbnail.startsWith("http")
-                ? thumbnail
-                : BASE_URL + thumbnail
-              : null,
-            link: link
-              ? link.startsWith("http")
-                ? link
-                : BASE_URL + link
-              : null,
-            rating: parseFloat(rating) || null,
-            status: status || null,
-          });
-        }
-      });
-
-      if (animeList.length > 0) break;
-    }
-
-    if (animeList.length === 0) {
-      throw new Error("Tidak ada anime ditemukan di halaman ini");
-    }
-    return animeList;
+    // Gunakan fungsi searchAnime dari API animeinweb
+    // Keyword kosong = fetch all/explore
+    const results = await searchAnime({
+        page: page,
+        sort: 'az', // Sort A-Z untuk list
+        keyword: ''
+    });
+    
+    // Map result agar sesuai format getAnimeList
+    // Format: { title, thumbnail, link, rating, status }
+    return results.results.map(anime => ({
+        title: anime.title,
+        thumbnail: anime.thumbnail,
+        link: anime.link,
+        rating: anime.rating || null,
+        status: anime.status || 'Unknown'
+    }));
   } catch (error) {
     console.error("Error fetching anime list:", error);
-    throw error;
+    // Return empty array on error instead of throwing to prevent 500
+    return [];
   }
 }
 
 // Ambil data video per episode dengan resolusi dan semua server
 async function getEpisodeVideo(episodeUrl) {
+  // Check if AnimeInWeb or AnimeIn URL
+  if (episodeUrl && (episodeUrl.includes('animeinweb') || episodeUrl.includes('animein.net') || episodeUrl.includes('/anime/'))) {
+    try {
+        console.log(`Detect AnimeInWeb URL: ${episodeUrl}`);
+        // Jika URL anime detail (e.g. /anime/123), ambil episode pertama/terbaru
+        if (episodeUrl.includes('/anime/')) {
+            const match = episodeUrl.match(/\/anime\/(\d+)/);
+            if (match) {
+                const animeId = match[1];
+                // Cek apakah ada param ep (e.g. ?ep=5)
+                const epMatch = episodeUrl.match(/ep=(\d+)/);
+                const epNum = epMatch ? epMatch[1] : '1'; // Default ke episode 1 jika tidak ada
+                
+                return await getAnimeInWebEpisode(animeId, epNum);
+            }
+        }
+    } catch (e) {
+        console.error("Error delegating to AnimeInWeb:", e);
+        // Fallback to scraping logic below if fails
+    }
+  }
+
   try {
     const url = episodeUrl.startsWith("http")
       ? episodeUrl
