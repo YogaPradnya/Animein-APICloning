@@ -64,7 +64,7 @@ async function scrapeWithAxios(url) {
 // Ambil episode terbaru - Menggunakan API AnimeInWeb (Get New Anime)
 async function getLatestEpisodes() {
   try {
-    // Gunakan fungsi getNew() yang menggunakan API animeinweb (lebih stabil)
+    // Gunakan fungsi getNew() yang sudah diupdate (menggunakan getToday fallback)
     const newAnime = await getNew();
     
     // Map result agar sesuai dengan format yang diharapkan frontend
@@ -72,7 +72,7 @@ async function getLatestEpisodes() {
       title: anime.title,
       link: anime.link, // Link ke deskripsi anime
       image: anime.thumbnail,
-      episode: "Baru", // Karena getNew return series, kita anggap ini episode baru
+      episode: "Baru", 
       id: anime.animeId,
       releaseDate: "Hari ini", 
       slug: anime.animeId // Gunakan ID sebagai slug
@@ -128,6 +128,58 @@ async function getAnimeDetail(urlOrSlug) {
  * @param {number} options.page - Halaman (default: 0)
  * @returns {Promise<Object>} Hasil pencarian dengan pagination info
  */
+// Fallback Cache
+let _allAnimeCache = null;
+let _lastCacheTime = 0;
+
+async function getAllAnimeFromSchedule() {
+  if (_allAnimeCache && (Date.now() - _lastCacheTime < 3600000)) {
+    return _allAnimeCache;
+  }
+  
+  console.log("Fetching full schedule as fallback for blocked API...");
+  const days = ["senin", "selasa", "rabu", "kamis", "jumat", "sabtu", "minggu"];
+  const allAnime = [];
+  const seenIds = new Set();
+  
+  try {
+    // Fetch parallel
+    const promises = days.map(day => getScheduleFromAPI(day));
+    const results = await Promise.all(promises);
+    
+    results.forEach(res => {
+      if (res && res.schedule) {
+        res.schedule.forEach(anime => {
+           if (!seenIds.has(anime.animeId)) {
+             seenIds.add(anime.animeId);
+             allAnime.push({
+               animeId: anime.animeId,
+               title: anime.title,
+               thumbnail: anime.thumbnail || anime.cover || anime.poster,
+               link: anime.link,
+               rating: null,
+               views: anime.views,
+               favorites: anime.favorite,
+               status: anime.status,
+               year: "",
+               type: "TV",
+               genres: anime.genre ? [anime.genre] : []
+             });
+           }
+        });
+      }
+    });
+    
+    _allAnimeCache = allAnime;
+    _lastCacheTime = Date.now();
+    console.log(`Fallback schedule fetched: ${allAnime.length} anime total`);
+    return allAnime;
+  } catch(e) {
+    console.error("Fallback schedule failed", e.message);
+    return [];
+  }
+}
+
 async function searchAnime(options = {}) {
   try {
     // Support both old format (string keyword) and new format (object options)
@@ -137,99 +189,102 @@ async function searchAnime(options = {}) {
     let page = 0;
 
     if (typeof options === "string") {
-      // Format lama: searchAnime('keyword')
       keyword = options;
     } else {
-      // Format baru: searchAnime({ keyword, genre, sort, page })
       keyword = options.keyword || "";
       genre = options.genre || null;
       sort = options.sort || "views";
       page = options.page || 0;
     }
 
-    console.log(
-      `Searching anime - keyword: "${keyword}", genre: ${genre}, sort: ${sort}, page: ${page}`,
-    );
+    console.log(`Searching anime - keyword: "${keyword}", genre: ${genre}, sort: ${sort}, page: ${page}`);
 
     // Build URL dengan parameter
     let searchApiUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/explore/movie?page=${page}&sort=${sort}&keyword=${encodeURIComponent(keyword)}`;
-
-    // Tambahkan filter genre jika ada
-    if (genre) {
-      searchApiUrl += `&genre_in=${genre}`;
-    }
+    if (genre) searchApiUrl += `&genre_in=${genre}`;
 
     console.log(`Fetching from API: ${searchApiUrl}`);
 
-    const response = await axios.get(searchApiUrl, {
-      timeout: 15000,
-      httpsAgent: httpsAgent,
-      headers: API_HEADERS
-    });
-    const apiData = response.data;
+    try {
+        const response = await axios.get(searchApiUrl, {
+          timeout: 15000,
+          httpsAgent: httpsAgent,
+          headers: API_HEADERS
+        });
+        const apiData = response.data;
 
-    if (!apiData || apiData.error) {
-      throw new Error(
-        "Tidak ada hasil dari API, coba lagi atau gunakan keyword yang berbeda",
-      );
+        if (!apiData || apiData.error) {
+          throw new Error("Tidak ada hasil dari API");
+        }
+
+        const movies = apiData.data?.movie || [];
+        const results = movies.map((movie) => ({
+            animeId: movie.id,
+            title: (movie.title || "").toLowerCase(),
+            alternativeTitle: (movie.synonyms || "").toLowerCase(),
+            synopsis: (movie.synopsis || "").toLowerCase(),
+            type: (movie.type || "").toLowerCase(),
+            status: (movie.status || "").toLowerCase(),
+            year: movie.year || "",
+            day: movie.day || "",
+            views: parseInt(movie.views) || 0,
+            favorites: parseInt(movie.favorites) || 0,
+            genres: movie.genre ? movie.genre.split(",").map((g) => g.trim().toLowerCase()) : [],
+            poster: movie.image_poster || "",
+            cover: movie.image_cover || "",
+            thumbnail: movie.image_poster || movie.image_cover || "",
+            link: `${ANIMEINWEB_URL}/anime/${movie.id}`,
+            airedStart: movie.aired_start || "",
+        }));
+        
+        console.log(`✅ Found ${results.length} results from API`);
+        return {
+          results: results,
+          pagination: {
+            currentPage: page,
+            hasNextPage: results.length >= 60,
+            totalResults: results.length,
+          },
+          filters: { keyword, genre, sort },
+        };
+    } catch (apiError) {
+        console.error(`Search API failed (${apiError.message}), using fallback schedule...`);
+        // Fallback: Filter from schedule
+        const allAnime = await getAllAnimeFromSchedule();
+        let filtered = allAnime;
+        
+        if (keyword) {
+            const k = keyword.toLowerCase();
+            filtered = filtered.filter(a => a.title.includes(k));
+        }
+        
+        if (sort === 'views') {
+            filtered.sort((a, b) => parseInt(b.views || 0) - parseInt(a.views || 0));
+        } else if (sort === 'favorites') {
+            filtered.sort((a, b) => parseInt(b.favorites || 0) - parseInt(a.favorites || 0));
+        } else if (sort === 'az' || sort === 'title') {
+            filtered.sort((a, b) => a.title.localeCompare(b.title));
+        }
+        
+        // Pagination logic for fallback (simple)
+        const perPage = 30;
+        const start = page * perPage;
+        const sliced = filtered.slice(start, start + perPage);
+        
+        return {
+            results: sliced,
+            pagination: {
+                currentPage: page,
+                hasNextPage: start + perPage < filtered.length,
+                totalResults: filtered.length
+            },
+            filters: { keyword, genre, sort }
+        };
     }
-
-    const movies = apiData.data?.movie || [];
-    const results = [];
-
-    movies.forEach((movie) => {
-      // Parse genres
-      const genres = movie.genre
-        ? movie.genre.split(",").map((g) => g.trim().toLowerCase())
-        : [];
-
-      results.push({
-        animeId: movie.id,
-        title: (movie.title || "").toLowerCase(),
-        alternativeTitle: (movie.synonyms || "").toLowerCase(),
-        synopsis: (movie.synopsis || "").toLowerCase(),
-        type: (movie.type || "").toLowerCase(),
-        status: (movie.status || "").toLowerCase(),
-        year: movie.year || "",
-        day: movie.day || "",
-        views: parseInt(movie.views) || 0,
-        favorites: parseInt(movie.favorites) || 0,
-        genres: genres,
-        poster: movie.image_poster || "",
-        cover: movie.image_cover || "",
-        thumbnail: movie.image_poster || movie.image_cover || "",
-        link: `${ANIMEINWEB_URL}/anime/${movie.id}`,
-        airedStart: movie.aired_start || "",
-      });
-    });
-
-    // Sorting lokal jika sort adalah 'title' (API mungkin tidak support sort by title)
-    if (sort === "title") {
-      results.sort((a, b) => a.title.localeCompare(b.title));
-    } else if (sort === "favorites") {
-      results.sort((a, b) => b.favorites - a.favorites);
-    }
-
-    console.log(
-      `✅ Found ${results.length} results for "${keyword}" (genre: ${genre}, sort: ${sort})`,
-    );
-
-    return {
-      results: results,
-      pagination: {
-        currentPage: page,
-        hasNextPage: results.length >= 60, // Biasanya API return max 60 per page
-        totalResults: results.length,
-      },
-      filters: {
-        keyword: keyword,
-        genre: genre,
-        sort: sort,
-      },
-    };
   } catch (error) {
     console.error("Error searching anime:", error);
-    throw new Error(`Gagal mencari anime: ${error.message}`);
+    // Return empty result instead of throwing error (prevent 500)
+    return { results: [], pagination: {}, filters: {} };
   }
 }
 
@@ -2903,51 +2958,44 @@ async function getScheduleWithPlaywright(day = null) {
 }
 
 // Ambil anime trending/popular dari homepage - menggunakan API internal untuk lebih cepat
+// Ambil anime trending/popular
 async function getTrending() {
   try {
     console.log("Fetching trending anime...");
-    // Gunakan API internal dengan sort=views untuk trending/popular
+    // Coba API explore dulu
     const apiUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/explore/movie?page=0&sort=views&keyword=`;
-    console.log(`Fetching from API: ${apiUrl}`);
-
-    let apiData = null;
+    
     try {
-      const response = await axios.get(apiUrl, { 
-        timeout: 15000,
-        httpsAgent: httpsAgent,
-        headers: API_HEADERS
-      });
-      apiData = response.data;
+        const response = await axios.get(apiUrl, { 
+            timeout: 15000,
+            httpsAgent: httpsAgent,
+            headers: API_HEADERS
+        });
+        
+        if (response.data && response.data.data && response.data.data.movie) {
+            return response.data.data.movie.slice(0, 30).map((movie) => ({
+              animeId: movie.id,
+              title: (movie.title || "").toLowerCase(),
+              thumbnail: movie.image_poster || movie.image_cover || "",
+              link: `${ANIMEINWEB_URL}/anime/${movie.id}`,
+              views: movie.views || "0",
+              favorites: movie.favorites || "0",
+              year: movie.year || "",
+              type: movie.type || "",
+            }));
+        }
     } catch (e) {
-      console.log('Axios trending failed, trying browser fallback...');
-      if (!process.env.VERCEL) {
-        apiData = await fetchApiWithBrowser(apiUrl);
-      }
+        console.log('Trending API failed, using fallback schedule...');
     }
 
-    if (!apiData || apiData.error || !apiData.data || !apiData.data.movie) {
-      console.log("No results found from API, falling back to scraping...");
-      // Fallback ke scraping jika API gagal
-      return await getTrendingFallback();
-    }
-
-    const results = apiData.data.movie.slice(0, 30).map((movie) => ({
-      animeId: movie.id,
-      title: (movie.title || "").toLowerCase(),
-      thumbnail: movie.image_poster || movie.image_cover || "",
-      link: `${ANIMEINWEB_URL}/anime/${movie.id}`,
-      views: movie.views || "0",
-      favorites: movie.favorites || "0",
-      year: movie.year || "",
-      type: movie.type || "",
-    }));
-
-    console.log(`✅ Found ${results.length} trending anime`);
-    return results;
+    // Fallback: Use getAllAnimeFromSchedule sorted by views
+    const all = await getAllAnimeFromSchedule();
+    // Sort by views desc
+    all.sort((a, b) => parseInt(b.views || 0) - parseInt(a.views || 0));
+    return all.slice(0, 30);
   } catch (error) {
-    console.error("Error fetching trending from API:", error.message);
-    // Fallback ke scraping jika API error
-    return await getTrendingFallback();
+    console.error("Error fetching trending:", error.message);
+    return [];
   }
 }
 
@@ -3024,49 +3072,34 @@ async function getTrendingFallback() {
 }
 
 // Ambil anime baru ditambahkan - menggunakan API internal untuk lebih cepat
+// Ambil anime baru ditambahkan - menggunakan API internal untuk lebih cepat
 async function getNew() {
   try {
-    console.log("Fetching new anime...");
-    // Gunakan API internal dengan sort=update untuk anime baru
-    const apiUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/explore/movie?page=0&sort=update&keyword=`;
-    console.log(`Fetching from API: ${apiUrl}`);
-
-    let apiData = null;
-    try {
-      const response = await axios.get(apiUrl, {
-        timeout: 15000,
-        httpsAgent: httpsAgent,
-        headers: API_HEADERS
-      });
-      apiData = response.data;
-    } catch (e) {
-      console.log('Axios new failed, trying browser fallback...');
-      if (!process.env.VERCEL) {
-        apiData = await fetchApiWithBrowser(apiUrl);
-      }
+    console.log("Fetching new anime via getToday (fallback safe)...");
+    
+    // Gunakan getToday() karena ini menggunakan /schedule API yang reliable (tidak diblokir Cloudflare)
+    // /explore API sering diblokir (403) di Vercel
+    const todayData = await getToday();
+    
+    if (todayData && todayData.anime) {
+        return todayData.anime.map(movie => ({
+          animeId: movie.animeId,
+          title: movie.title,
+          thumbnail: movie.thumbnail || movie.cover,
+          link: movie.link,
+          views: movie.views,
+          favorites: movie.favorite,
+          year: "",
+          type: "TV"
+        }));
     }
-
-    if (!apiData || apiData.error || !apiData.data || !apiData.data.movie) {
-      console.log("No results found from API, falling back to scraping...");
-      return await getNewFallback();
-    }
-
-    const results = apiData.data.movie.slice(0, 30).map((movie) => ({
-      animeId: movie.id,
-      title: (movie.title || "").toLowerCase(),
-      thumbnail: movie.image_poster || movie.image_cover || "",
-      link: `${ANIMEINWEB_URL}/anime/${movie.id}`,
-      views: movie.views || "0",
-      favorites: movie.favorites || "0",
-      year: movie.year || "",
-      type: movie.type || "",
-    }));
-
-    console.log(`✅ Found ${results.length} new anime`);
-    return results;
+    
+    // Jika getToday kosong, coba getAllAnimeFromSchedule dan ambil 30 pertama (anggap itu baru)
+    const all = await getAllAnimeFromSchedule();
+    return all.slice(0, 30);
   } catch (error) {
-    console.error("Error fetching new anime from API:", error.message);
-    return await getNewFallback();
+    console.error("Error fetching new anime:", error.message);
+    return [];
   }
 }
 
