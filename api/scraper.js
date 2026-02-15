@@ -14,13 +14,49 @@ const BASE_URL = process.env.BASE_URL;
 const ANIMEINWEB_URL = process.env.ANIMEINWEB_URL;
 
 // Common Headers untuk request ke animeinweb (menghindari blokir Cloudflare/WAF)
+// Menggunakan header lengkap layaknya browser Chrome asli (Verified Bypass)
 const API_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-  "Accept": "application/json",
+  "Accept": "application/json, text/plain, */*",
   "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
   "Referer": `${ANIMEINWEB_URL}/`,
   "Origin": ANIMEINWEB_URL,
+  "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+  "Sec-Ch-Ua-Mobile": "?0",
+  "Sec-Ch-Ua-Platform": '"Windows"',
+  "Sec-Fetch-Dest": "empty",
+  "Sec-Fetch-Mode": "cors",
+  "Sec-Fetch-Site": "same-origin",
+  "Priority": "u=1, i",
+  "Connection": "keep-alive"
 };
+
+// Global Cookie Jar (In-Memory)
+let globalCookies = "";
+
+// Helper untuk mendapatkan headers dinamis dengan cookie terbaru
+function getDynamicHeaders() {
+    const headers = { ...API_HEADERS };
+    if (globalCookies) {
+        headers["Cookie"] = globalCookies;
+    }
+    return headers;
+}
+
+// Helper untuk update cookie dari response headers
+function updateCookies(response) {
+    if (response && response.headers) {
+        const setCookie = response.headers['set-cookie'];
+        if (setCookie) {
+            // Gabungkan cookie baru dengan yang lama
+            const newCookies = setCookie.map(c => c.split(';')[0]).join('; ');
+            // Simple logic: replace or append (for now just replace/update primary session)
+            console.log("🍪 Session Cookie Refreshed!");
+            globalCookies = newCookies; 
+        }
+    }
+}
+
 
 // Fungsi untuk scrape dengan Playwright (hanya fallback jika benar-benar butuh)
 async function scrapeWithPlaywright(url) {
@@ -199,92 +235,111 @@ async function searchAnime(options = {}) {
 
     console.log(`Searching anime - keyword: "${keyword}", genre: ${genre}, sort: ${sort}, page: ${page}`);
 
-    // Build URL dengan parameter
+    // URL Search
     let searchApiUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/explore/movie?page=${page}&sort=${sort}&keyword=${encodeURIComponent(keyword)}`;
     if (genre) searchApiUrl += `&genre_in=${genre}`;
 
     console.log(`Fetching from API: ${searchApiUrl}`);
 
-    try {
-        const response = await axios.get(searchApiUrl, {
-          timeout: 15000,
-          httpsAgent: httpsAgent,
-          headers: API_HEADERS
-        });
-        const apiData = response.data;
+    // Loop retry logic untuk bypass
+    let apiData = null;
+    let attempts = 0;
+    const maxAttempts = 2; // Coba 2x (Tanpa cookie -> Refresh cookie -> Retry)
 
-        if (!apiData || apiData.error) {
-          throw new Error("Tidak ada hasil dari API");
+    while (attempts < maxAttempts && !apiData) {
+        attempts++;
+        try {
+            // Gunakan dynamic headers (dengan cookie)
+            const response = await axios.get(searchApiUrl, {
+              timeout: 10000, // Cepat timeout agar tidak blocking lama
+              httpsAgent: httpsAgent,
+              headers: getDynamicHeaders()
+            });
+            
+            updateCookies(response); // Simpan cookie jika berhasil
+            apiData = response.data;
+        } catch (err) {
+            const isForbidden = err.response && (err.response.status === 403 || err.response.status === 520);
+            if (isForbidden && attempts < maxAttempts) {
+                console.log("⚠️ Access Forbidden (403). Memicu refresh session via Schedule API...");
+                // Panggil schedule (yang known working) untuk dapat cookie
+                await getScheduleFromAPI('SENIN'); 
+                continue; // Retry loop dengan cookie baru
+            }
+            // Jika bukan 403 atau sudah max retry, throw ke fallback
+            throw err;
         }
-
-        const movies = apiData.data?.movie || [];
-        const results = movies.map((movie) => ({
-            animeId: movie.id,
-            title: (movie.title || "").toLowerCase(),
-            alternativeTitle: (movie.synonyms || "").toLowerCase(),
-            synopsis: (movie.synopsis || "").toLowerCase(),
-            type: (movie.type || "").toLowerCase(),
-            status: (movie.status || "").toLowerCase(),
-            year: movie.year || "",
-            day: movie.day || "",
-            views: parseInt(movie.views) || 0,
-            favorites: parseInt(movie.favorites) || 0,
-            genres: movie.genre ? movie.genre.split(",").map((g) => g.trim().toLowerCase()) : [],
-            poster: movie.image_poster || "",
-            cover: movie.image_cover || "",
-            thumbnail: movie.image_poster || movie.image_cover || "",
-            link: `${ANIMEINWEB_URL}/anime/${movie.id}`,
-            airedStart: movie.aired_start || "",
-        }));
-        
-        console.log(`✅ Found ${results.length} results from API`);
-        return {
-          results: results,
-          pagination: {
-            currentPage: page,
-            hasNextPage: results.length >= 60,
-            totalResults: results.length,
-          },
-          filters: { keyword, genre, sort },
-        };
-    } catch (apiError) {
-        console.error(`Search API failed (${apiError.message}), using fallback schedule...`);
-        // Fallback: Filter from schedule
-        const allAnime = await getAllAnimeFromSchedule();
-        let filtered = allAnime;
-        
-        if (keyword) {
-            const k = keyword.toLowerCase();
-            filtered = filtered.filter(a => a.title.includes(k));
-        }
-        
-        if (sort === 'views') {
-            filtered.sort((a, b) => parseInt(b.views || 0) - parseInt(a.views || 0));
-        } else if (sort === 'favorites') {
-            filtered.sort((a, b) => parseInt(b.favorites || 0) - parseInt(a.favorites || 0));
-        } else if (sort === 'az' || sort === 'title') {
-            filtered.sort((a, b) => a.title.localeCompare(b.title));
-        }
-        
-        // Pagination logic for fallback (simple)
-        const perPage = 30;
-        const start = page * perPage;
-        const sliced = filtered.slice(start, start + perPage);
-        
-        return {
-            results: sliced,
-            pagination: {
-                currentPage: page,
-                hasNextPage: start + perPage < filtered.length,
-                totalResults: filtered.length
-            },
-            filters: { keyword, genre, sort }
-        };
     }
-  } catch (error) {
-    console.error("Error searching anime:", error);
-    // Return empty result instead of throwing error (prevent 500)
-    return { results: [], pagination: {}, filters: {} };
+
+    // If we reach here, we have apiData
+    if (!apiData || apiData.error) {
+      throw new Error("Tidak ada hasil dari API");
+    }
+
+    const movies = apiData.data?.movie || [];
+    const results = movies.map((movie) => ({
+        animeId: movie.id,
+        title: (movie.title || "").toLowerCase(),
+        alternativeTitle: (movie.synonyms || "").toLowerCase(),
+        synopsis: (movie.synopsis || "").toLowerCase(),
+        type: (movie.type || "").toLowerCase(),
+        status: (movie.status || "").toLowerCase(),
+        year: movie.year || "",
+        day: movie.day || "",
+        views: parseInt(movie.views) || 0,
+        favorites: parseInt(movie.favorites) || 0,
+        genres: movie.genre ? movie.genre.split(",").map((g) => g.trim().toLowerCase()) : [],
+        poster: movie.image_poster || "",
+        cover: movie.image_cover || "",
+        thumbnail: movie.image_poster || movie.image_cover || "",
+        link: `${ANIMEINWEB_URL}/anime/${movie.id}`,
+        airedStart: movie.aired_start || "",
+    }));
+    
+    console.log(`✅ Found ${results.length} results from API`);
+    return {
+      results: results,
+      pagination: {
+        currentPage: page,
+        hasNextPage: results.length >= 60,
+        totalResults: results.length,
+      },
+      filters: { keyword, genre, sort },
+    };
+
+  } catch (apiError) {
+      console.error(`Search API failed (${apiError.message}), using fallback schedule...`);
+      // Fallback: Filter from schedule
+      const allAnime = await getAllAnimeFromSchedule();
+      let filtered = allAnime;
+      
+      if (keyword) {
+          const k = keyword.toLowerCase();
+          filtered = filtered.filter(a => a.title.includes(k));
+      }
+      
+      if (sort === 'views') {
+          filtered.sort((a, b) => parseInt(b.views || 0) - parseInt(a.views || 0));
+      } else if (sort === 'favorites') {
+          filtered.sort((a, b) => parseInt(b.favorites || 0) - parseInt(a.favorites || 0));
+      } else if (sort === 'az' || sort === 'title') {
+          filtered.sort((a, b) => a.title.localeCompare(b.title));
+      }
+      
+      // Pagination logic for fallback (simple)
+      const perPage = 30;
+      const start = page * perPage;
+      const sliced = filtered.slice(start, start + perPage);
+      
+      return {
+          results: sliced,
+          pagination: {
+              currentPage: page,
+              hasNextPage: start + perPage < filtered.length,
+              totalResults: filtered.length
+          },
+          filters: { keyword, genre, sort }
+      };
   }
 }
 
@@ -1678,24 +1733,38 @@ async function getAnimeInWebData(animeIdOrUrl) {
 
     // Gunakan API langsung untuk data lengkap
     const detailApiUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/movie/detail/${animeId}`;
-    const episodeApiUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/movie/episode/${animeId}?page=0`;
-
+    
     console.log(`Fetching from API: ${detailApiUrl}`);
     let detailData = null;
-    try {
-      const detailResponse = await axios.get(detailApiUrl, { 
-        httpsAgent: httpsAgent,
-        headers: API_HEADERS,
-        timeout: 15000 
-      });
-      detailData = detailResponse.data;
-    } catch (e) {
-      console.log('Axios detail failed, trying browser fallback...');
-      if (!process.env.VERCEL) {
-        detailData = await fetchApiWithBrowser(detailApiUrl);
-      } else {
-        throw e;
-      }
+    
+    // Retry logic untuk Detail
+    let attempts = 0;
+    while(attempts < 2 && !detailData) {
+        attempts++;
+        try {
+            const detailResponse = await axios.get(detailApiUrl, { 
+                httpsAgent: httpsAgent,
+                headers: getDynamicHeaders(), // Use Cookie
+                timeout: 15000 
+            });
+            updateCookies(detailResponse);
+            detailData = detailResponse.data;
+        } catch (e) {
+            if (e.response && e.response.status === 403 && attempts < 2) {
+                 console.log("⚠️ Detail 403. Refreshing session...");
+                 await getScheduleFromAPI('SENIN');
+                 continue;
+            }
+            // Fallback terakhir: Cek di Cache Schedule? (Partial Data)
+            // Atau throw error agar ditangani server.js
+            console.log('Axios detail failed:', e.message);
+            if (!process.env.VERCEL) {
+                // Browser fallback only on local
+                detailData = await fetchApiWithBrowser(detailApiUrl);
+            } else {
+                throw e;
+            }
+        }
     }
 
     if (!detailData || detailData.error || !detailData.data) {
@@ -2275,14 +2344,11 @@ async function getScheduleFromAPI(day = null) {
           const response = await axios.get(scheduleUrl, {
             timeout: 20000,
             httpsAgent: httpsAgent,
-            headers: {
-              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-              "Accept": "application/json",
-              "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
-              "Referer": `${ANIMEINWEB_URL}/schedule`,
-              "Origin": ANIMEINWEB_URL,
-            },
+            headers: getDynamicHeaders() // Use & Update Cookies
           });
+          
+          updateCookies(response); // PENTING: Update cookie dari endpoint yang BERHASIL
+          
           scheduleData = response.data;
           console.log(`[Schedule API] Response status: ${response.status} for ${targetDay}`);
         } catch (e) {
