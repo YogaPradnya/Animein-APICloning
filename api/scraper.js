@@ -1964,8 +1964,21 @@ async function getAnimeInWebData(animeIdOrUrl) {
     const episodeApiUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/movie/episode/${animeId}?page=0`;
 
     console.log(`Fetching from API: ${detailApiUrl}`);
-    const detailResponse = await axios.get(detailApiUrl);
-    const detailData = detailResponse.data;
+    let detailData = null;
+    try {
+      const detailResponse = await axios.get(detailApiUrl, { 
+        httpsAgent: httpsAgent,
+        timeout: 15000 
+      });
+      detailData = detailResponse.data;
+    } catch (e) {
+      console.log('Axios detail failed, trying browser fallback...');
+      if (!process.env.VERCEL) {
+        detailData = await fetchApiWithBrowser(detailApiUrl);
+      } else {
+        throw e;
+      }
+    }
 
     if (!detailData || detailData.error || !detailData.data) {
       throw new Error("Failed to fetch anime detail from API");
@@ -1986,10 +1999,19 @@ async function getAnimeInWebData(animeIdOrUrl) {
       console.log(`Fetching episode page ${page}...`);
 
       try {
-        const episodeResponse = await axios.get(currentPageUrl, {
-          timeout: 15000,
-        });
-        const episodeData = episodeResponse.data;
+        let episodeData = null;
+        try {
+          const episodeResponse = await axios.get(currentPageUrl, {
+            timeout: 15000,
+            httpsAgent: httpsAgent
+          });
+          episodeData = episodeResponse.data;
+        } catch (e) {
+          console.log('Axios episode list failed, trying browser fallback...');
+          if (!process.env.VERCEL) {
+            episodeData = await fetchApiWithBrowser(currentPageUrl);
+          }
+        }
 
         if (
           episodeData &&
@@ -2450,15 +2472,24 @@ async function getSchedule(day = null) {
     } catch (e) {}
   }
 
-  // Untuk Vercel atau jika Playwright tidak tersedia: pakai API internal schedule
-  if (isVercel || !usePlaywright) {
-    console.log("[Schedule] Using API internal schedule (tanpa Playwright)...");
+  // Untuk Vercel: SELALU pakai API internal (tanpa browser automation)
+  if (process.env.VERCEL) {
     return await getScheduleFromAPI(day);
   }
 
-  // Untuk local development dengan Playwright
-  console.log("[Schedule] Using Playwright for local development...");
-  return await getScheduleWithPlaywright(day);
+  // Untuk local: PRIORITASKAN API via Browser (bypass Cloudflare)
+  console.log("[Schedule] Using API via Browser (bypass Cloudflare)...");
+  try {
+    return await getScheduleFromAPI(day);
+  } catch (e) {
+    console.log("[Schedule] API failed, falling back to UI scraping...");
+    try {
+      return await getScheduleWithPlaywright(day);
+    } catch (err) {
+      console.error("[Schedule] All methods failed:", err.message);
+      return { currentDay: day || 'UNKNOWN', schedule: [] };
+    }
+  }
 }
 
 // Fungsi terpisah untuk mengambil schedule dari API internal (tanpa Playwright)
@@ -2519,21 +2550,33 @@ async function getScheduleFromAPI(day = null) {
       const scheduleUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/schedule/data?day=${targetDay}`;
 
       try {
-        const response = await axios.get(scheduleUrl, {
-          timeout: 20000,
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            Accept: "application/json",
-            "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
-            Referer: `${ANIMEINWEB_URL}/schedule`,
-            Origin: ANIMEINWEB_URL,
-          },
-        });
-
-        console.log(
-          `[Schedule API] Response status: ${response.status} for ${targetDay}`,
-        );
+        let scheduleData = null;
+        try {
+          const response = await axios.get(scheduleUrl, {
+            timeout: 20000,
+            httpsAgent: httpsAgent,
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+              "Accept": "application/json",
+              "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+              "Referer": `${ANIMEINWEB_URL}/schedule`,
+              "Origin": ANIMEINWEB_URL,
+            },
+          });
+          scheduleData = response.data;
+          console.log(`[Schedule API] Response status: ${response.status} for ${targetDay}`);
+        } catch (e) {
+          console.log(`[Schedule API] Axios failed, trying browser fallback...`);
+          if (!process.env.VERCEL) {
+            const apiResp = await fetchApiWithBrowser(scheduleUrl);
+            scheduleData = apiResp;
+          } else {
+            throw e;
+          }
+        }
+        
+        // Mock response structure compatible with existing code
+        const response = { data: scheduleData };
 
         if (response.data) {
           // Cek struktur response
@@ -3202,8 +3245,19 @@ async function getTrending() {
     const apiUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/explore/movie?page=0&sort=views&keyword=`;
     console.log(`Fetching from API: ${apiUrl}`);
 
-    const response = await axios.get(apiUrl, { timeout: 15000 });
-    const apiData = response.data;
+    let apiData = null;
+    try {
+      const response = await axios.get(apiUrl, { 
+        timeout: 15000,
+        httpsAgent: httpsAgent 
+      });
+      apiData = response.data;
+    } catch (e) {
+      console.log('Axios trending failed, trying browser fallback...');
+      if (!process.env.VERCEL) {
+        apiData = await fetchApiWithBrowser(apiUrl);
+      }
+    }
 
     if (!apiData || apiData.error || !apiData.data || !apiData.data.movie) {
       console.log("No results found from API, falling back to scraping...");
@@ -3310,8 +3364,19 @@ async function getNew() {
     const apiUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/explore/movie?page=0&sort=update&keyword=`;
     console.log(`Fetching from API: ${apiUrl}`);
 
-    const response = await axios.get(apiUrl, { timeout: 15000 });
-    const apiData = response.data;
+    let apiData = null;
+    try {
+      const response = await axios.get(apiUrl, {
+        timeout: 15000,
+        httpsAgent: httpsAgent
+      });
+      apiData = response.data;
+    } catch (e) {
+      console.log('Axios new failed, trying browser fallback...');
+      if (!process.env.VERCEL) {
+        apiData = await fetchApiWithBrowser(apiUrl);
+      }
+    }
 
     if (!apiData || apiData.error || !apiData.data || !apiData.data.movie) {
       console.log("No results found from API, falling back to scraping...");
