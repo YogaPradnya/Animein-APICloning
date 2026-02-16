@@ -3264,7 +3264,14 @@ async function getToday() {
     };
   } catch (error) {
     console.error("Error fetching today anime:", error);
-    throw error;
+    // Return empty result instead of throwing to prevent 500
+    const today = new Date();
+    const dayNames = ["minggu", "senin", "selasa", "rabu", "kamis", "jumat", "sabtu"]; 
+    return {
+      day: dayNames[today.getDay()],
+      date: today.toISOString().split("T")[0],
+      anime: [] 
+    };
   }
 }
 

@@ -118,9 +118,11 @@ const handleEndpoint = (handler, timeoutMs = 30000) => {
     } catch (error) {
       clearTimeout(timeout);
       if (!res.headersSent) {
+        console.error(`[SERVER ERROR] ${req.method} ${req.url}:`, error);
         res.status(500).json({
           success: false,
-          error: error.message
+          error: error.message,
+          stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
       }
     }
