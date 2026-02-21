@@ -693,31 +693,7 @@ app.get(['/api/v1/genres', '/api/v1/genres/'], cacheMiddleware(86400), handleEnd
   }
 }));
 
-// Endpoint untuk mendapatkan info batch download dengan pembagian 25 eps per pack
-app.get(['/api/v1/download/batch-info', '/api/v1/download/batch-info/'], cacheMiddleware(3600), handleEndpoint(async (req, res) => {
-  try {
-    const { animeId } = req.query;
-    
-    if (!animeId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Parameter animeId diperlukan. Contoh: /api/v1/download/batch-info?animeId=426'
-      });
-    }
-    
-    const batchInfo = await scraper.getBatchDownloadInfo(animeId);
-    
-    res.json({
-      success: true,
-      data: batchInfo
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-}));
+// [REMOVED] Download endpoints dihapus
 
 // Endpoint untuk list semua anime (dengan dan tanpa trailing slash)
 app.get('/api/v1/list', cacheMiddleware(1800), handleEndpoint(async (req, res) => {
@@ -865,143 +841,8 @@ app.get(['/api/v1/animeinweb/today', '/api/v1/animeinweb/today/', '/api/v1/today
   };
 }, 20000)); // 20 detik timeout
 
-// Endpoint untuk download episode (return download link)
-app.get(['/api/v1/download/episode', '/api/v1/download/episode/'], handleEndpoint(async (req, res) => {
-  const { animeId, episodeNumber, resolution } = req.query;
-  
-  if (!animeId || !episodeNumber) {
-    throw new Error('Parameter animeId dan episodeNumber diperlukan. Contoh: /api/v1/download/episode?animeId=341&episodeNumber=500&resolution=1080p');
-  }
-  
-  // Get episode data
-  const episodeData = await scraper.getAnimeInWebEpisode(animeId, episodeNumber);
-  
-  if (!episodeData || !episodeData.videoSources || episodeData.videoSources.length === 0) {
-    throw new Error('Video source tidak ditemukan untuk episode ini');
-  }
-  
-  // Pilih video source berdasarkan resolution atau ambil yang tertinggi
-  let selectedVideo = episodeData.videoSources[0]; // Default: RAPSODI tertinggi
-  
-  if (resolution) {
-    const foundVideo = episodeData.videoSources.find(v => 
-      v.resolution.toLowerCase() === resolution.toLowerCase() || 
-      v.quality.toLowerCase() === resolution.toLowerCase()
-    );
-    if (foundVideo) {
-      selectedVideo = foundVideo;
-    }
-  }
-  
-  // Return download info
-  return {
-    success: true,
-    data: {
-      animeId: animeId,
-      animeTitle: episodeData.animeTitle,
-      episodeNumber: episodeNumber,
-      episodeTitle: episodeData.title,
-      downloadUrl: selectedVideo.url, // URL sudah di-decode
-      resolution: selectedVideo.resolution,
-      quality: selectedVideo.quality,
-      server: selectedVideo.server,
-      fileSize: selectedVideo.fileSize || null,
-      type: selectedVideo.type,
-      note: 'Gunakan downloadUrl untuk download video. URL sudah di-decode dan siap digunakan.'
-    }
-  };
-}, 30000)); // 30 detik timeout
-
-// Endpoint untuk batch download semua episode (return list download links)
-app.get(['/api/v1/download/batch', '/api/v1/download/batch/'], handleEndpoint(async (req, res) => {
-  const { animeId, resolution, startEpisode, endEpisode } = req.query;
-  
-  if (!animeId) {
-    throw new Error('Parameter animeId diperlukan. Contoh: /api/v1/download/batch?animeId=341&resolution=1080p&startEpisode=1&endEpisode=500');
-  }
-  
-  // Get anime info untuk mendapatkan list episode
-  const animeData = await scraper.getAnimeInWebData(animeId);
-  
-  if (!animeData || !animeData.episodes || animeData.episodes.length === 0) {
-    throw new Error('Episode list tidak ditemukan untuk anime ini');
-  }
-  
-  // Filter episode berdasarkan range (jika ada)
-  let episodesToDownload = animeData.episodes;
-  if (startEpisode || endEpisode) {
-    const start = startEpisode ? parseInt(startEpisode) : 1;
-    const end = endEpisode ? parseInt(endEpisode) : episodesToDownload.length;
-    episodesToDownload = episodesToDownload.filter(ep => {
-      const epNum = parseInt(ep.number) || 0;
-      return epNum >= start && epNum <= end;
-    });
-  }
-  
-  // Get download links untuk setiap episode (limit untuk menghindari timeout)
-  const maxEpisodes = 50; // Limit untuk menghindari timeout
-  const episodesToProcess = episodesToDownload.slice(0, maxEpisodes);
-  
-  const downloadLinks = [];
-  let processed = 0;
-  let failed = 0;
-  
-  for (const episode of episodesToProcess) {
-    try {
-      const episodeData = await scraper.getAnimeInWebEpisode(animeId, episode.number);
-      
-      if (episodeData && episodeData.videoSources && episodeData.videoSources.length > 0) {
-        // Pilih video source berdasarkan resolution atau ambil yang tertinggi
-        let selectedVideo = episodeData.videoSources[0];
-        
-        if (resolution) {
-          const foundVideo = episodeData.videoSources.find(v => 
-            v.resolution.toLowerCase() === resolution.toLowerCase() || 
-            v.quality.toLowerCase() === resolution.toLowerCase()
-          );
-          if (foundVideo) {
-            selectedVideo = foundVideo;
-          }
-        }
-        
-        downloadLinks.push({
-          episodeNumber: episode.number,
-          episodeTitle: episodeData.title,
-          downloadUrl: selectedVideo.url,
-          resolution: selectedVideo.resolution,
-          quality: selectedVideo.quality,
-          server: selectedVideo.server,
-          fileSize: selectedVideo.fileSize || null,
-          type: selectedVideo.type
-        });
-        processed++;
-      } else {
-        failed++;
-      }
-    } catch (error) {
-      console.error(`Error fetching episode ${episode.number}:`, error.message);
-      failed++;
-    }
-    
-    // Small delay untuk menghindari rate limit
-    await new Promise(resolve => setTimeout(resolve, 500));
-  }
-  
-  return {
-    success: true,
-    data: {
-      animeId: animeId,
-      animeTitle: animeData.title,
-      totalEpisodes: episodesToDownload.length,
-      processedEpisodes: processed,
-      failedEpisodes: failed,
-      downloadLinks: downloadLinks,
-      note: episodesToDownload.length > maxEpisodes 
-        ? `Hanya memproses ${maxEpisodes} episode pertama. Gunakan parameter startEpisode dan endEpisode untuk batch lainnya.`
-        : 'Semua episode berhasil diproses. Gunakan downloadUrl untuk download video.'
-    }
-  };
-}, 300000)); // 5 menit timeout untuk batch
+// [REMOVED] Download episode & batch endpoints dihapus
+// Endpoint untuk get video episode dengan resolusi (dengan dan tanpa trailing slash)
 
 // Endpoint untuk get video episode dengan resolusi (dengan dan tanpa trailing slash)
 app.get('/api/v1/episode', handleEndpoint(async (req, res) => {
@@ -1087,10 +928,7 @@ if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
     console.log(`   GET /api/v1/schedule?day=... - Jadwal anime (day: senin/selasa/rabu/kamis/jumat/sabtu/minggu/random)`);
     console.log(`   GET /api/v1/trending - Anime sedang hangat/popular`);
     console.log(`   GET /api/v1/new - Anime baru ditambahkan`);
-    console.log(`   GET /api/v1/today - Anime hari ini`);
-    console.log(`   GET /api/v1/download/episode?animeId=...&episodeNumber=...&resolution=... - Download link per episode`);
-    console.log(`   GET /api/v1/download/batch-info?animeId=... - Info batch download per 25 episode`);
-    console.log(`   GET /api/v1/download/batch?animeId=...&resolution=...&startEpisode=...&endEpisode=... - Download link batch\n`);
+    console.log(`   GET /api/v1/today - Anime hari ini\n`);
   });
 }
 
