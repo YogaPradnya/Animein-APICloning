@@ -2335,6 +2335,16 @@ async function getScheduleFromAPI(day = null) {
       RANDOM: "RANDOM",
     };
 
+    const dayIds = {
+      SENIN: "SENIN",
+      SELASA: "SELASA",
+      RABU: "RABU",
+      KAMIS: "KAMIS",
+      JUMAT: "JUMAT",
+      SABTU: "SABTU",
+      MINGGU: "MINGGU"
+    };
+
     // Tentukan hari yang akan diambil
     const targetDay = day
       ? dayMap[day.toLowerCase()] || day.toUpperCase()
@@ -2418,30 +2428,78 @@ async function getScheduleFromAPI(day = null) {
           }
         });
 
-        // Log untuk debugging
-        if (data.schedule.length > 0) {
-          console.log(
-            `[Schedule API] Successfully processed ${data.schedule.length} anime for ${targetDay}`,
-          );
-        } else if (movies.length > 0) {
-          console.log(
-            `[Schedule API] Warning: Found ${movies.length} movies but processed 0 (check parsing logic)`,
-          );
-        }
       } catch (apiError) {
         console.error(
           `[Schedule API] Error fetching ${targetDay}:`,
           apiError.message,
         );
-        console.error(
-          `[Schedule API] Error details:`,
-          apiError.response?.status,
-          apiError.response?.statusText,
-        );
-        // JANGAN fallback ke explore API, return empty array saja
-        // Ini untuk memastikan setiap hari punya data yang berbeda
-        return data;
       }
+
+      // FALLBACK: Jika API gagal atau kosong, coba scrape HTML langsung (Cheerio)
+      // Ini mengakomodasi instruction user tentang Cheerio .each() logic
+      if (data.schedule.length === 0) {
+        console.log(`[Schedule API] API Empty/Failed for ${targetDay}, attempting Cheerio HTML Scrape fallback...`);
+        try {
+          const htmlContent = await animeinwebFetch(`${ANIMEINWEB_URL}/schedule`, 20000);
+          if (typeof htmlContent === 'string') {
+            const $ = cheerio.load(htmlContent);
+            
+            // Mencari kontainer berdasarkan ID atau class (Hari Sabtu sering pakai #SABTU atau .SAB/SABTU)
+            const dayId = dayIds[targetDay];
+            const dayShort = dayNames[targetDay];
+            
+            // Cari selector yang paling mungkin (user mention #SABTU atau .SAB)
+            const selectors = [
+              `#${dayId}`, `#${dayShort}`, `.${dayId}`, `.${dayShort}`,
+              `[id*="${dayId}"]`, `[id*="${dayShort}"]`,
+              `[class*="${dayId}"]`, `[class*="${dayShort}"]`,
+              '.schedule-list', '.grid'
+            ];
+
+            let found = false;
+            for (const selector of selectors) {
+              if (found) break;
+              
+              const $container = $(selector);
+              if ($container.length > 0) {
+                // Gunakan .each() seperti yang dinstruksikan user
+                $container.find('a[href*="/anime/"]').each((i, el) => {
+                  const $el = $(el);
+                  const href = $el.attr('href');
+                  const animeIdMatch = href.match(/\/anime\/(\d+)/);
+                  
+                  if (animeIdMatch && !seenIds.has(animeIdMatch[1])) {
+                    found = true;
+                    const animeId = animeIdMatch[1];
+                    seenIds.add(animeId);
+                    
+                    const title = $el.find('div[class*="font-bold"]').text().trim() || $el.text().trim();
+                    const thumb = $el.find('img').attr('src') || $el.find('img').attr('data-src');
+                    
+                    data.schedule.push({
+                      animeId: String(animeId),
+                      title: title.toLowerCase(),
+                      genre: $el.find('div[class*="text-xs"]').first().text().trim() || null,
+                      views: $el.text().match(/([\d.]+)\s*view/i)?.[1] || "0",
+                      favorite: $el.text().match(/([\d.]+)\s*favorite/i)?.[1] || "0",
+                      releaseTime: $el.text().match(/(\d+[hj]\s*\d+[jm]|new|tunda)/i)?.[0] || null,
+                      link: href.startsWith('http') ? href : `${ANIMEINWEB_URL}${href}`,
+                      thumbnail: thumb || "",
+                      cover: thumb || "",
+                      poster: thumb || "",
+                      isNew: $el.text().toLowerCase().includes('new'),
+                      status: "ongoing"
+                    });
+                  }
+                });
+              }
+            }
+          }
+        } catch (scrapeErr) {
+          console.error(`[Schedule Scrape] Fallback failed:`, scrapeErr.message);
+        }
+      }
+      return data;
     } else if (targetDay === "RANDOM") {
       // Untuk RANDOM, ambil dari explore API
       console.log("[Schedule API] Fetching random anime from explore API...");
@@ -2700,9 +2758,15 @@ async function getScheduleWithPlaywright(day = null) {
       };
 
       // Extract current active tab
-      const currentActiveTab = document.querySelector(
+      let currentActiveTab = document.querySelector(
         '[role="tab"][aria-selected="true"]',
       );
+      
+      // Fallback: cari tab yang punya class "text-main" (indikasi aktif di website mereka)
+      if (!currentActiveTab) {
+        currentActiveTab = document.querySelector('button[role="tab"].text-main, [class*="tab"].text-main');
+      }
+
       if (currentActiveTab) {
         data.currentDay = currentActiveTab.textContent.trim();
       }
@@ -2737,8 +2801,9 @@ async function getScheduleWithPlaywright(day = null) {
       // Jika tidak ada tabpanel, cari container yang visible dan terkait dengan tab aktif
       if (!activePanel) {
         // Coba cari berdasarkan data attribute atau class yang menunjukkan tab aktif
+        // Juga cari selector spesifik seperti #SABTU atau .SAB seperti instruksi user
         const possibleContainers = document.querySelectorAll(
-          '[data-day], [class*="schedule"], [class*="day"], [class*="grid"], [class*="container"]',
+          '[data-day], [class*="schedule"], [class*="day"], [class*="grid"], [class*="container"], #SABTU, .SAB, .SABTU',
         );
         possibleContainers.forEach((container) => {
           const isHidden =
