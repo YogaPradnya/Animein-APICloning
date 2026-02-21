@@ -1819,7 +1819,7 @@ async function getAnimeInWebData(animeIdOrUrl) {
 
     // Fetch episode list - CONCURRENTLY to make it FAST!
     const episodes = [];
-    const maxPages = 15; // Limit 15 pages = max ~450 episode, cukup untuk anime panjang
+    const maxPages = 45; // Limit 45 pages = max ~1350 episode, cukup untuk anime panjang seperti One Piece
     console.log(`Fetching up to ${maxPages} episode pages concurrently for ${animeId}...`);
 
     const pagePromises = Array.from({ length: maxPages }).map((_, page) => {
