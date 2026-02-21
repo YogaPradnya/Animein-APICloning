@@ -1817,6 +1817,25 @@ async function getAnimeInWebData(animeIdOrUrl) {
     const movie = detailData.data.movie;
     const currentEpisode = detailData.data.episode;
 
+    // Tambahan: Fetch Rating dan Author dari Jikan API secara paralel supaya cepat
+    let jikanRating = "";
+    let jikanAuthor = "";
+    const animeTitleSearch = movie.title || "";
+    const jikanPromise = axios.get(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(animeTitleSearch)}&limit=1`, { timeout: 3500 })
+      .then(res => {
+        if (res.data && res.data.data && res.data.data.length > 0) {
+          const jData = res.data.data[0];
+          jikanRating = jData.score ? jData.score.toString() : "";
+          const authors = [];
+          if (jData.studios && jData.studios.length > 0) jData.studios.forEach(s => authors.push(s.name.toLowerCase()));
+          else if (jData.producers && jData.producers.length > 0) jData.producers.forEach(p => authors.push(p.name.toLowerCase()));
+          jikanAuthor = authors.join(', ');
+        }
+      })
+      .catch(e => {
+        console.log('Jikan API fallback skip:', e.message);
+      });
+
     // Fetch episode list - CONCURRENTLY to make it FAST!
     const episodes = [];
     const maxPages = 100; // Limit 45 pages = max ~1350 episode, cukup untuk anime panjang seperti One Piece
@@ -1834,7 +1853,10 @@ async function getAnimeInWebData(animeIdOrUrl) {
       });
     });
 
+    // Tunggu semua proses (episodes & jikan rating) selesai bersamaan
     const pagesResults = await Promise.all(pagePromises);
+    await jikanPromise;
+    
     let totalValidPages = 0;
 
     pagesResults.forEach((episodeData, page) => {
@@ -1891,8 +1913,8 @@ async function getAnimeInWebData(animeIdOrUrl) {
       airedEnd: (movie.aired_end || "").toLowerCase(),
       studios: studios,
       genres: genres,
-      author: "", // Tidak ada di API
-      rating: "", // Tidak ada di API
+      author: jikanAuthor || "", 
+      rating: jikanRating || "", 
       cover: movie.image_cover || "",
       poster: movie.image_poster || "",
       thumbnail: movie.image_cover || movie.image_poster || "",
