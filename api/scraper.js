@@ -1817,98 +1817,54 @@ async function getAnimeInWebData(animeIdOrUrl) {
     const movie = detailData.data.movie;
     const currentEpisode = detailData.data.episode;
 
-    // Fetch episode list - AMBIL SEMUA PAGE untuk mendapatkan semua episode
-    const episodeApiUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/movie/episode/${animeId}`;
-    console.log(`Fetching episode list: ${episodeApiUrl}`);
+    // Fetch episode list - CONCURRENTLY to make it FAST!
     const episodes = [];
-    let page = 0;
-    let hasMore = true;
-    const maxPages = 10; // Limit 10 pages = max ~300 episode, cukup untuk response cepat
+    const maxPages = 15; // Limit 15 pages = max ~450 episode, cukup untuk anime panjang
+    console.log(`Fetching up to ${maxPages} episode pages concurrently for ${animeId}...`);
 
-    while (hasMore && page < maxPages) {
+    const pagePromises = Array.from({ length: maxPages }).map((_, page) => {
       const currentPageUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/movie/episode/${animeId}?page=${page}`;
-      console.log(`Fetching episode page ${page}...`);
-
-      try {
-        let episodeData = null;
-        try {
-          episodeData = await animeinwebFetch(currentPageUrl, 15000);
-        } catch (e) {
-          console.log('animeinwebFetch episode list failed, trying browser fallback...');
-          if (!process.env.VERCEL) {
-            episodeData = await fetchApiWithBrowser(currentPageUrl);
-          }
+      return animeinwebFetch(currentPageUrl, 10000).catch(async (e) => {
+        if (!process.env.VERCEL) {
+          try {
+            return await fetchApiWithBrowser(currentPageUrl);
+          } catch(err) { return null; }
         }
+        return null;
+      });
+    });
 
-        if (
-          episodeData &&
-          episodeData.data &&
-          episodeData.data.episode &&
-          episodeData.data.episode.length > 0
-        ) {
-          // Parse episodes dari page ini
-          episodeData.data.episode.forEach((ep) => {
-            episodes.push({
-              number: ep.index,
-              episodeId: ep.id,
-              title: ep.title.toLowerCase(),
-              views: ep.views || "0",
-              releaseDate: ep.key_time || "",
-              thumbnail: ep.image
-                ? ep.image.startsWith("http")
-                  ? ep.image
-                  : `https://xyz-api.animein.net${ep.image}`
-                : null,
-              isNew: ep.is_new === "1",
-              link: `${ANIMEINWEB_URL}/anime/${animeId}?ep=${ep.index}`,
-            });
+    const pagesResults = await Promise.all(pagePromises);
+    let totalValidPages = 0;
+
+    pagesResults.forEach((episodeData, page) => {
+      if (
+        episodeData &&
+        episodeData.data &&
+        episodeData.data.episode &&
+        episodeData.data.episode.length > 0
+      ) {
+        totalValidPages++;
+        episodeData.data.episode.forEach((ep) => {
+          episodes.push({
+            number: ep.index,
+            episodeId: ep.id,
+            title: ep.title.toLowerCase(),
+            views: ep.views || "0",
+            releaseDate: ep.key_time || "",
+            thumbnail: ep.image
+              ? ep.image.startsWith("http")
+                ? ep.image
+                : `https://xyz-api.animein.net${ep.image}`
+              : null,
+            isNew: ep.is_new === "1",
+            link: `${ANIMEINWEB_URL}/anime/${animeId}?ep=${ep.index}`,
           });
-
-          // Check apakah masih ada page berikutnya
-          // Biasanya API return 30 episode per page, jika kurang dari 30 berarti sudah habis
-          // Atau cek has_more jika ada di response
-          const episodeCount = episodeData.data.episode.length;
-          hasMore = episodeCount >= 30; // Jika dapat 30 episode, kemungkinan masih ada page berikutnya
-
-          if (episodeData.data.has_more !== undefined) {
-            hasMore =
-              episodeData.data.has_more === true ||
-              episodeData.data.has_more === "1";
-          }
-
-          console.log(
-            `  Page ${page}: ${episodeCount} episodes (Total: ${episodes.length})`,
-          );
-
-          // Jika dapat kurang dari 30 episode, berarti sudah habis
-          if (episodeCount < 30) {
-            hasMore = false;
-          }
-
-          page++;
-        } else {
-          // Tidak ada episode di page ini, stop
-          hasMore = false;
-        }
-      } catch (error) {
-        console.error(`Error fetching page ${page}:`, error.message);
-        // Jika error, coba lanjut ke page berikutnya (mungkin page tidak ada)
-        if (page === 0) {
-          // Jika page 0 error, throw error
-          throw error;
-        } else {
-          // Jika page selanjutnya error, berarti sudah habis
-          hasMore = false;
-        }
+        });
       }
+    });
 
-      // Small delay untuk menghindari rate limit
-      if (hasMore) {
-        await new Promise((resolve) => setTimeout(resolve, 300));
-      }
-    }
-
-    console.log(`✅ Fetched ${episodes.length} episodes from ${page} page(s)`);
+    console.log(`✅ Fetched ${episodes.length} episodes from ${totalValidPages} valid page(s)`);
 
     // Sort episodes by number (latest first)
     episodes.sort((a, b) => {
@@ -1976,84 +1932,60 @@ async function getAnimeInWebEpisode(animeId, episodeNumber) {
     let animeTitle = "";
 
     try {
-      // Fetch semua page untuk mencari episode (atau bisa langsung cari di page yang tepat)
-      // Untuk optimasi, kita coba page 0 dulu, kalau tidak ketemu baru cari di page lain
-      let foundEpisode = false;
-      let page = 0;
-      // Hitung page awal berdasarkan nomor episode (API return ~30 eps per page, urutan DESC)
-      // Episode API diurutkan dari TERBESAR ke TERKECIL, jadi ep.1 ada di page paling akhir
-      // ep.500 ada di page 0, ep.1 ada di page ~16 (500/30)
-      // Kita coba mulai dari page yang diperkirakan berisi episode ini
-      const estimatedPage = Math.max(0, Math.floor((parseInt(episodeNumber) - 1) / 30));
-      // Kita perlu cari dari HIGH page (terbaru) ke LOW page (terlama)
-      // API mengembalikan episode dari BESAR ke KECIL dalam tiap page
-      // Jadi ep.500 ada di page 0, ep.470 di page 1, dst
-      // Sebaliknya, ep.1 ada di page terakhir
-      // Hitung halaman dari akhir: untuk ep.N dari total T episode:
-      // page = floor((T - N) / 30) tapi kita tidak tau T, jadi kita scan dari page 0
-      // Untuk episode besar, ia ada di page awal. Untuk episode kecil, di page akhir.
-      // Kita scan dari page 0 dengan max 50 pages.
-      const maxSearchPages = 50; // Cukup untuk 50*30=1500 episode
-
-      while (!foundEpisode && page < maxSearchPages) {
-        const episodeListUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/movie/episode/${animeId}?page=${page}`;
-        console.log(`Searching episode in page ${page}: ${episodeListUrl}`);
-        const episodeListData = await animeinwebFetch(episodeListUrl, 10000);
-
-        if (
-          episodeListData &&
-          episodeListData.data &&
-          episodeListData.data.episode
-        ) {
-          // Cari episode dengan nomor yang sesuai
-          const targetEpisode = episodeListData.data.episode.find(
-            (ep) =>
-              ep.index === episodeNumber.toString() ||
-              ep.index === parseInt(episodeNumber).toString(),
-          );
-
-          if (targetEpisode) {
-            episodeId = targetEpisode.id;
-            episodeInfo = targetEpisode;
-            foundEpisode = true;
-            console.log(
-              `✅ Found episode ID ${episodeId} from page ${page} (FAST!)`,
-            );
-            break;
-          }
-
-          // Cek apakah episode yang dicari ada di range page ini
-          const episodeIndices = episodeListData.data.episode.map(
-            (ep) => parseInt(ep.index) || 0,
-          );
-          const maxEpInPage = Math.max(...episodeIndices);
-          const minEpInPage = Math.min(...episodeIndices);
-          const targetEpNum = parseInt(episodeNumber);
-
-          // Jika target episode lebih besar dari max di page ini, berarti tidak ada
-          // (karena API urutan DESC per page, page 0 = episode terbesar)
-          // Jika target lebih kecil dari min di page ini, cari di page berikutnya
-          if (targetEpNum > maxEpInPage && page > 0) {
-            // Episode ini mestinya ada di page sebelumnya - tidak ada
-            break;
-          }
-
-          // Jika page ini sudah return < 30 episodes, berarti ini page terakhir
-          if (episodeListData.data.episode.length < 30 && targetEpNum < minEpInPage) {
-            break; // Episode tidak ada sama sekali
-          }
-
-          page++;
-        } else {
-          break;
-        }
-      }
-
-      // Ambil anime title dari detail API
+      // Ambil anime title dari detail API terlebih dahulu (sambil fetch episode later)
       const detailUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/movie/detail/${animeId}`;
-      const detailApiResp = await animeinwebFetch(detailUrl, 10000);
+      const detailApiResp = await animeinwebFetch(detailUrl, 5000).catch(() => null);
       if (detailApiResp && detailApiResp.data && detailApiResp.data.movie) {
         animeTitle = detailApiResp.data.movie.title || "";
+      }
+
+      // Batch concurrent requests (10 pages per batch) untuk mencari episode ID dengan CEPAT
+      const maxSearchPages = 50; 
+      const batchSize = 10;
+      let foundEpisode = false;
+
+      for (let batchStart = 0; batchStart < maxSearchPages && !foundEpisode; batchStart += batchSize) {
+        console.log(`Searching episode in pages ${batchStart} to ${batchStart + batchSize - 1} concurrently...`);
+        
+        const batchPromises = Array.from({ length: batchSize }).map((_, i) => {
+          const p = batchStart + i;
+          const url = `${ANIMEINWEB_URL}/api/proxy/3/2/movie/episode/${animeId}?page=${p}`;
+          return animeinwebFetch(url, 7000).catch(async (e) => {
+            if (!process.env.VERCEL) {
+              try { return await fetchApiWithBrowser(url); } catch(err) { return null; }
+            }
+            return null;
+          });
+        });
+
+        const batchResults = await Promise.all(batchPromises);
+        let shouldStopSearch = false; // Jika kita mencapai ujung / page kosong
+
+        for (const episodeListData of batchResults) {
+          if (episodeListData && episodeListData.data && episodeListData.data.episode && episodeListData.data.episode.length > 0) {
+            // Cari episode dengan nomor yang sesuai
+            const targetEpisode = episodeListData.data.episode.find(
+              (ep) =>
+                ep.index === episodeNumber.toString() ||
+                ep.index === parseInt(episodeNumber).toString(),
+            );
+
+            if (targetEpisode) {
+              episodeId = targetEpisode.id;
+              episodeInfo = targetEpisode;
+              foundEpisode = true;
+              console.log(`✅ Found episode ID ${episodeId} (FAST PARALLEL!)`);
+              break;
+            }
+
+            // Jika ada array dengan size < 30, kemungkinan besar itu page teterakhir, jadi kita bisa stop search batch selanjutnya
+            if (episodeListData.data.episode.length < 30) {
+              shouldStopSearch = true;
+            }
+          }
+        }
+
+        if (foundEpisode || shouldStopSearch) break;
       }
     } catch (apiError) {
       console.log(
