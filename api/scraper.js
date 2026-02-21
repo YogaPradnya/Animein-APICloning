@@ -306,6 +306,8 @@ async function searchAnime(options = {}) {
   let genre = null;
   let sort = "views";
   let page = 0;
+  let status = null;
+  let type = null;
 
   // Support both old format (string keyword) and new format (object options)
   if (typeof options === "string") {
@@ -315,6 +317,8 @@ async function searchAnime(options = {}) {
     genre = options.genre || null;
     sort = options.sort || "views";
     page = options.page || 0;
+    status = options.status || null;
+    type = options.type || null;
   }
 
   try {
@@ -323,6 +327,8 @@ async function searchAnime(options = {}) {
     // URL Search
     let searchApiUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/explore/movie?page=${page}&sort=${sort}&keyword=${encodeURIComponent(keyword)}`;
     if (genre) searchApiUrl += `&genre_in=${genre}`;
+    if (status) searchApiUrl += `&status=${status.toLowerCase()}`;
+    if (type) searchApiUrl += `&type=${type.toLowerCase()}`;
 
     console.log(`Fetching from API: ${searchApiUrl}`);
 
@@ -363,7 +369,7 @@ async function searchAnime(options = {}) {
         hasNextPage: results.length >= 60,
         totalResults: results.length,
       },
-      filters: { keyword, genre, sort },
+      filters: { keyword, genre, sort, status, type },
     };
 
   } catch (apiError) {

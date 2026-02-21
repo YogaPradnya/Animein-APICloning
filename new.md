@@ -92,6 +92,8 @@ GET /api/v1/search?q={keyword}&genre={id}&sort={sort}&page={page}
 | `q`       | string | ❌    | `""`    | Keyword pencarian                       |
 | `genre`   | number | ❌    | -       | ID genre (lihat `/genres`)              |
 | `sort`    | string | ❌    | `views` | `views`, `title`, `favorites`, `newest` |
+| `status`  | string | ❌    | -       | `ongoing`, `completed`                  |
+| `type`    | string | ❌    | -       | `tv`, `movie`, `live-action`            |
 | `page`    | number | ❌    | `0`     | Nomor halaman (mulai dari 0)            |
 
 ```bash
@@ -104,8 +106,17 @@ curl "http://localhost:3001/api/v1/search?genre=14&sort=views"
 # Kombinasi keyword + genre + sort
 curl "http://localhost:3001/api/v1/search?q=hero&genre=14&sort=favorites&page=0"
 
-# Semua anime sort terbaru
-curl "http://localhost:3001/api/v1/search?sort=newest"
+# Filter berdasarkan status tayang (Ongoing / Completed)
+curl "http://localhost:3001/api/v1/search?status=ongoing"
+curl "http://localhost:3001/api/v1/search?status=completed"
+
+# Filter berdasarkan tipe (TV / Movie / Live Action)
+curl "http://localhost:3001/api/v1/search?type=tv"
+curl "http://localhost:3001/api/v1/search?type=movie"
+curl "http://localhost:3001/api/v1/search?type=live-action"
+
+# Semua filter digabung
+curl "http://localhost:3001/api/v1/search?status=ongoing&type=tv&sort=newest"
 
 # Halaman berikutnya
 curl "http://localhost:3001/api/v1/search?q=sword&page=1"
@@ -531,6 +542,9 @@ curl "http://localhost:3001/api/v1/today"
 
 - 🔐 **Core:** Implementasi `undici` HTTP/2 client + Rotating User Agents + In-Memory Cookie Jar untuk **100% bypass Cloudflare CF-Mitigated**.
 - 🖼️ **Images:** Menggunakan auto-proxy CDN gratis `wsrv.nl` secara global untuk membypass proteksi hotlink gambar (403). Endpoint `/api/v1/image` internal dihapus.
+- ⚡ **Performance:** Fetch API episode page menggunakan Concurrent Batch (`Promise.all`)! Mempercepat response _AnimeInWeb Info_ dari **~10.000ms ke ~2.400ms** dan mereturn hingga **1300+ episode sekaligus** untuk anime panjang (One Piece dkk).
+- 🌟 **Feature:** Menambahkan properti `author` dan `rating` konkrit memanfaatkan integrasi Jikan (MyAnimeList) API di Endpoint `/detail`.
+- 🔎 **Feature:** Menambahkan filter tambahan `status` (ongoing/completed) dan `type` (tv/movie/live-action) pada Endpoint `/search` untuk sidebar Frontend.
 - 🧹 **Clean up:** Penghapusan belasan file dump logs (`*resp.json`, `/logs/`) dan test scripts yang tidak terpakai lagi.
 
 ### v1.2.0 — 2026-02-21

@@ -688,16 +688,20 @@ app.get('/api/v1/detail/', cacheMiddleware(1800), handleEndpoint(async (req, res
 // - q: keyword pencarian (opsional)
 // - genre: ID genre untuk filter (opsional) 
 // - sort: views | title | favorites | newest (default: views = paling populer)
+// - status: ongoing | completed (opsional)
+// - type: tv | movie | live-action (opsional)
 // - page: halaman (default: 0)
 app.get(['/api/v1/search', '/api/v1/search/'], cacheMiddleware(300), handleEndpoint(async (req, res) => {
   try {
-    const { q, genre, sort, page } = req.query;
+    const { q, genre, sort, page, status, type } = req.query;
     
     const searchOptions = {
       keyword: q || '',
       genre: genre || null,
       sort: sort || 'views', // Default: sort by views (paling populer di atas)
-      page: parseInt(page) || 0
+      page: parseInt(page) || 0,
+      status: status || null,
+      type: type || null
     };
     
     const result = await scraper.searchAnime(searchOptions);
