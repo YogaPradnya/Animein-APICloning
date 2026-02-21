@@ -3,8 +3,9 @@ const https = require("https");
 const cheerio = require("cheerio");
 const { chromium } = require("playwright");
 const helpers = require("./scraper_helpers");
+const { cfFetch, cfFetchWithRetry, updateCookieJar } = require('./cf-fetch');
 
-// HTTPS Agent untuk bypass SSL certificate error
+// HTTPS Agent untuk bypass SSL certificate error (dipakai oleh axios untuk fallback)
 const httpsAgent = new https.Agent({
   rejectUnauthorized: false,
 });
@@ -13,8 +14,7 @@ const httpsAgent = new https.Agent({
 const BASE_URL = process.env.BASE_URL;
 const ANIMEINWEB_URL = process.env.ANIMEINWEB_URL;
 
-// Common Headers untuk request ke animeinweb (menghindari blokir Cloudflare/WAF)
-// Menggunakan header lengkap layaknya browser Chrome asli (Verified Bypass)
+// Common Headers (dipakai sebagai fallback oleh axios)
 const API_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
   "Accept": "application/json, text/plain, */*",
@@ -31,7 +31,7 @@ const API_HEADERS = {
   "Connection": "keep-alive"
 };
 
-// Global Cookie Jar (In-Memory)
+// Global Cookie Jar (In-Memory) — dipertahankan untuk kompatibilitas
 let globalCookies = "";
 
 // Helper untuk mendapatkan headers dinamis dengan cookie terbaru
@@ -43,18 +43,40 @@ function getDynamicHeaders() {
     return headers;
 }
 
-// Helper untuk update cookie dari response headers
+// Helper untuk update cookie dari response headers (axios fallback)
 function updateCookies(response) {
     if (response && response.headers) {
         const setCookie = response.headers['set-cookie'];
         if (setCookie) {
-            // Gabungkan cookie baru dengan yang lama
             const newCookies = setCookie.map(c => c.split(';')[0]).join('; ');
-            // Simple logic: replace or append (for now just replace/update primary session)
             console.log("🍪 Session Cookie Refreshed!");
-            globalCookies = newCookies; 
+            globalCookies = newCookies;
         }
     }
+}
+
+/**
+ * Wrapper fetch ke animeinweb — prioritaskan cfFetchWithRetry (undici HTTP/2)
+ * fallback ke axios jika undici gagal.
+ * @param {string} apiUrl
+ * @param {number} [timeout=20000]
+ */
+async function animeinwebFetch(apiUrl, timeout = 20000) {
+  try {
+    // Prioritas 1: undici (HTTP/2, rotating UA, cookie jar)
+    const data = await cfFetchWithRetry(apiUrl, { timeout }, 2);
+    return data;
+  } catch (undiciErr) {
+    console.log(`⚠️  [animeinwebFetch] undici failed, fallback to axios: ${undiciErr.message}`);
+    // Prioritas 2: axios dengan headers lengkap
+    const response = await axios.get(apiUrl, {
+      timeout,
+      httpsAgent,
+      headers: getDynamicHeaders()
+    });
+    updateCookies(response);
+    return response.data;
+  }
 }
 
 
@@ -305,34 +327,8 @@ async function searchAnime(options = {}) {
     console.log(`Fetching from API: ${searchApiUrl}`);
 
     // Loop retry logic untuk bypass
-    let apiData = null;
-    let attempts = 0;
-    const maxAttempts = 2; // Coba 2x (Tanpa cookie -> Refresh cookie -> Retry)
-
-    while (attempts < maxAttempts && !apiData) {
-        attempts++;
-        try {
-            // Gunakan dynamic headers (dengan cookie)
-            const response = await axios.get(searchApiUrl, {
-              timeout: 10000, // Cepat timeout agar tidak blocking lama
-              httpsAgent: httpsAgent,
-              headers: getDynamicHeaders()
-            });
-            
-            updateCookies(response); // Simpan cookie jika berhasil
-            apiData = response.data;
-        } catch (err) {
-            const isForbidden = err.response && (err.response.status === 403 || err.response.status === 520);
-            if (isForbidden && attempts < maxAttempts) {
-                console.log("⚠️ Access Forbidden (403). Memicu refresh session via Schedule API...");
-                // Panggil schedule (yang known working) untuk dapat cookie
-                await getScheduleFromAPI('SENIN'); 
-                continue; // Retry loop dengan cookie baru
-            }
-            // Jika bukan 403 atau sudah max retry, throw ke fallback
-            throw err;
-        }
-    }
+    // Gunakan animeinwebFetch (undici HTTP/2) dengan retry otomatis
+    const apiData = await animeinwebFetch(searchApiUrl, 15000);
 
     // If we reach here, we have apiData
     if (!apiData || apiData.error) {
@@ -416,20 +412,19 @@ async function getGenres() {
 
     const genreApiUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/explore/genre`;
 
-    const response = await axios.get(genreApiUrl, {
-      timeout: 10000,
-      httpsAgent: httpsAgent,
-      headers: API_HEADERS
-    });
-
-    const apiData = response.data;
+    const apiData = await animeinwebFetch(genreApiUrl, 15000);
 
     if (!apiData || !apiData.data) {
       throw new Error("Gagal mengambil data genre");
     }
 
+    // API mengembalikan { data: { genre: [...] } } atau { data: [...] }
+    const rawGenres = Array.isArray(apiData.data) 
+      ? apiData.data 
+      : (apiData.data.genre || []);
+
     // Parse genre list
-    const genres = apiData.data.map((g) => ({
+    const genres = rawGenres.map((g) => ({
       id: g.id,
       name: (g.name || g.genre || "").toLowerCase(),
       count: g.count || 0,
@@ -1801,36 +1796,18 @@ async function getAnimeInWebData(animeIdOrUrl) {
     const detailApiUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/movie/detail/${animeId}`;
     
     console.log(`Fetching from API: ${detailApiUrl}`);
+    // Gunakan animeinwebFetch (undici HTTP/2, rotating UA) untuk bypass Cloudflare
     let detailData = null;
-    
-    // Retry logic untuk Detail
-    let attempts = 0;
-    while(attempts < 2 && !detailData) {
-        attempts++;
-        try {
-            const detailResponse = await axios.get(detailApiUrl, { 
-                httpsAgent: httpsAgent,
-                headers: getDynamicHeaders(), // Use Cookie
-                timeout: 15000 
-            });
-            updateCookies(detailResponse);
-            detailData = detailResponse.data;
-        } catch (e) {
-            if (e.response && e.response.status === 403 && attempts < 2) {
-                 console.log("⚠️ Detail 403. Refreshing session...");
-                 await getScheduleFromAPI('SENIN');
-                 continue;
-            }
-            // Fallback terakhir: Cek di Cache Schedule? (Partial Data)
-            // Atau throw error agar ditangani server.js
-            console.log('Axios detail failed:', e.message);
-            if (!process.env.VERCEL) {
-                // Browser fallback only on local
-                detailData = await fetchApiWithBrowser(detailApiUrl);
-            } else {
-                throw e;
-            }
-        }
+    try {
+      detailData = await animeinwebFetch(detailApiUrl, 15000);
+    } catch (e) {
+      console.log('animeinwebFetch detail failed:', e.message);
+      if (!process.env.VERCEL) {
+        // Browser fallback only on local
+        detailData = await fetchApiWithBrowser(detailApiUrl);
+      } else {
+        throw e;
+      }
     }
 
     if (!detailData || detailData.error || !detailData.data) {
@@ -1855,13 +1832,9 @@ async function getAnimeInWebData(animeIdOrUrl) {
       try {
         let episodeData = null;
         try {
-          const episodeResponse = await axios.get(currentPageUrl, {
-            timeout: 15000,
-            httpsAgent: httpsAgent
-          });
-          episodeData = episodeResponse.data;
+          episodeData = await animeinwebFetch(currentPageUrl, 15000);
         } catch (e) {
-          console.log('Axios episode list failed, trying browser fallback...');
+          console.log('animeinwebFetch episode list failed, trying browser fallback...');
           if (!process.env.VERCEL) {
             episodeData = await fetchApiWithBrowser(currentPageUrl);
           }
@@ -2025,12 +1998,7 @@ async function getAnimeInWebEpisode(animeId, episodeNumber) {
       while (!foundEpisode && page < maxSearchPages) {
         const episodeListUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/movie/episode/${animeId}?page=${page}`;
         console.log(`Searching episode in page ${page}: ${episodeListUrl}`);
-        const episodeListResponse = await axios.get(episodeListUrl, {
-          timeout: 10000,
-          httpsAgent: httpsAgent,
-          headers: API_HEADERS
-        });
-        const episodeListData = episodeListResponse.data;
+        const episodeListData = await animeinwebFetch(episodeListUrl, 10000);
 
         if (
           episodeListData &&
@@ -2083,13 +2051,9 @@ async function getAnimeInWebEpisode(animeId, episodeNumber) {
 
       // Ambil anime title dari detail API
       const detailUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/movie/detail/${animeId}`;
-      const detailResponse = await axios.get(detailUrl, { timeout: 10000 });
-      if (
-        detailResponse.data &&
-        detailResponse.data.data &&
-        detailResponse.data.data.movie
-      ) {
-        animeTitle = detailResponse.data.data.movie.title || "";
+      const detailApiResp = await animeinwebFetch(detailUrl, 10000);
+      if (detailApiResp && detailApiResp.data && detailApiResp.data.movie) {
+        animeTitle = detailApiResp.data.movie.title || "";
       }
     } catch (apiError) {
       console.log(
@@ -2168,8 +2132,7 @@ async function getAnimeInWebEpisode(animeId, episodeNumber) {
     const apiUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/episode/streamnew/${episodeId}`;
     console.log(`Fetching from API: ${apiUrl}`);
 
-    const response = await axios.get(apiUrl);
-    const apiData = response.data;
+    const apiData = await animeinwebFetch(apiUrl, 20000);
 
     if (!apiData || apiData.error || !apiData.data) {
       throw new Error("Failed to fetch episode data from API");
@@ -2429,102 +2392,81 @@ async function getScheduleFromAPI(day = null) {
       const scheduleUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/schedule/data?day=${targetDay}`;
 
       try {
-        let scheduleData = null;
+        // Gunakan animeinwebFetch (undici HTTP/2, rotating UA)
+        let scheduleApiData = null;
         try {
-          const response = await axios.get(scheduleUrl, {
-            timeout: 20000,
-            httpsAgent: httpsAgent,
-            headers: getDynamicHeaders() // Use & Update Cookies
-          });
-          
-          updateCookies(response); // PENTING: Update cookie dari endpoint yang BERHASIL
-          
-          scheduleData = response.data;
-          console.log(`[Schedule API] Response status: ${response.status} for ${targetDay}`);
+          scheduleApiData = await animeinwebFetch(scheduleUrl, 20000);
+          console.log(`[Schedule API] Success for ${targetDay}`);
         } catch (e) {
-          console.log(`[Schedule API] Axios failed, trying browser fallback...`);
+          console.log(`[Schedule API] animeinwebFetch failed, trying browser fallback...`);
           if (!process.env.VERCEL) {
-            const apiResp = await fetchApiWithBrowser(scheduleUrl);
-            scheduleData = apiResp;
+            scheduleApiData = await fetchApiWithBrowser(scheduleUrl);
           } else {
             throw e;
           }
         }
         
-        // Mock response structure compatible with existing code
-        const response = { data: scheduleData };
+        // Normalize data structure
+        const rawData = scheduleApiData;
+        let scheduleData = rawData?.data ?? rawData;
 
-        if (response.data) {
-          // Cek struktur response
-          let scheduleData = null;
-          if (response.data.data) {
-            scheduleData = response.data.data;
-          } else if (Array.isArray(response.data)) {
-            scheduleData = response.data;
-          } else {
-            scheduleData = response.data;
-          }
-
-          // Data bisa berupa array langsung atau object dengan property movie/schedule
-          let movies = [];
-          if (Array.isArray(scheduleData)) {
-            movies = scheduleData;
-          } else if (scheduleData && scheduleData.movie) {
-            movies = scheduleData.movie;
-          } else if (scheduleData && scheduleData.schedule) {
-            movies = scheduleData.schedule;
-          } else if (scheduleData && typeof scheduleData === "object") {
-            // Coba iterate keys untuk cari array
-            for (const key of Object.keys(scheduleData)) {
-              if (Array.isArray(scheduleData[key])) {
-                movies = scheduleData[key];
-                break;
-              }
+        // Data bisa berupa array langsung atau object dengan property movie/schedule
+        let movies = [];
+        if (Array.isArray(scheduleData)) {
+          movies = scheduleData;
+        } else if (scheduleData && scheduleData.movie) {
+          movies = scheduleData.movie;
+        } else if (scheduleData && scheduleData.schedule) {
+          movies = scheduleData.schedule;
+        } else if (scheduleData && typeof scheduleData === "object") {
+          // Coba iterate keys untuk cari array
+          for (const key of Object.keys(scheduleData)) {
+            if (Array.isArray(scheduleData[key])) {
+              movies = scheduleData[key];
+              break;
             }
           }
+        }
 
+        console.log(
+          `[Schedule API] Found ${movies.length} anime for ${targetDay}`,
+        );
+
+        // Karena endpoint sudah memfilter per hari, kita percaya semua data yang dikembalikan
+        movies.forEach((movie) => {
+          const animeId = movie.id || movie.anime_id || movie.movie_id;
+
+          if (animeId && !seenIds.has(animeId)) {
+            seenIds.add(animeId);
+            const genres = movie.genre
+              ? movie.genre.split(",").map((g) => g.trim().toLowerCase())
+              : [];
+            data.schedule.push({
+              animeId: String(animeId),
+              title: (movie.title || movie.name || "").toLowerCase(),
+              genre: genres[0] || null,
+              views: movie.views || movie.view || "0",
+              favorite: movie.favorites || movie.favorite || "0",
+              releaseTime: movie.time || movie.release_time || null,
+              link: `${ANIMEINWEB_URL}/anime/${animeId}`,
+              thumbnail: movie.image_poster || movie.poster || movie.image || "",
+              cover: movie.image_cover || movie.cover || movie.image_poster || "",
+              poster: movie.image_poster || movie.poster || "",
+              isNew: movie.is_new || false,
+              status: (movie.status || "ongoing").toLowerCase(),
+            });
+          }
+        });
+
+        // Log untuk debugging
+        if (data.schedule.length > 0) {
           console.log(
-            `[Schedule API] Found ${movies.length} anime for ${targetDay}`,
+            `[Schedule API] Successfully processed ${data.schedule.length} anime for ${targetDay}`,
           );
-
-          // Karena endpoint sudah memfilter per hari, kita percaya semua data yang dikembalikan
-          movies.forEach((movie) => {
-            const animeId = movie.id || movie.anime_id || movie.movie_id;
-
-            if (animeId && !seenIds.has(animeId)) {
-              seenIds.add(animeId);
-              const genres = movie.genre
-                ? movie.genre.split(",").map((g) => g.trim().toLowerCase())
-                : [];
-              data.schedule.push({
-                animeId: String(animeId),
-                title: (movie.title || movie.name || "").toLowerCase(),
-                genre: genres[0] || null,
-                views: movie.views || movie.view || "0",
-                favorite: movie.favorites || movie.favorite || "0",
-                releaseTime: movie.time || movie.release_time || null,
-                link: `${ANIMEINWEB_URL}/anime/${animeId}`,
-                thumbnail:
-                  movie.image_poster || movie.poster || movie.image || "",
-                cover:
-                  movie.image_cover || movie.cover || movie.image_poster || "",
-                poster: movie.image_poster || movie.poster || "",
-                isNew: movie.is_new || false,
-                status: (movie.status || "ongoing").toLowerCase(),
-              });
-            }
-          });
-
-          // Log untuk debugging
-          if (data.schedule.length > 0) {
-            console.log(
-              `[Schedule API] Successfully processed ${data.schedule.length} anime for ${targetDay}`,
-            );
-          } else if (movies.length > 0) {
-            console.log(
-              `[Schedule API] Warning: Found ${movies.length} movies but processed 0 (check parsing logic)`,
-            );
-          }
+        } else if (movies.length > 0) {
+          console.log(
+            `[Schedule API] Warning: Found ${movies.length} movies but processed 0 (check parsing logic)`,
+          );
         }
       } catch (apiError) {
         console.error(
@@ -2544,14 +2486,14 @@ async function getScheduleFromAPI(day = null) {
       // Untuk RANDOM, ambil dari explore API
       console.log("[Schedule API] Fetching random anime from explore API...");
       const exploreUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/explore/movie?page=0&sort=update&keyword=`;
-      const exploreResponse = await axios.get(exploreUrl, { timeout: 10000 });
+      const exploreData = await animeinwebFetch(exploreUrl, 15000);
 
       if (
-        exploreResponse.data &&
-        exploreResponse.data.data &&
-        exploreResponse.data.data.movie
+        exploreData &&
+        exploreData.data &&
+        exploreData.data.movie
       ) {
-        const movies = exploreResponse.data.data.movie.slice(0, 60);
+        const movies = exploreData.data.movie.slice(0, 60);
 
         movies.forEach((movie) => {
           if (!seenIds.has(movie.id)) {
@@ -3122,14 +3064,10 @@ async function getTrending() {
     const apiUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/explore/movie?page=0&sort=views&keyword=`;
     
     try {
-        const response = await axios.get(apiUrl, { 
-            timeout: 15000,
-            httpsAgent: httpsAgent,
-            headers: API_HEADERS
-        });
+        const trendData = await animeinwebFetch(apiUrl, 15000);
         
-        if (response.data && response.data.data && response.data.data.movie) {
-            return response.data.data.movie.slice(0, 30).map((movie) => ({
+        if (trendData && trendData.data && trendData.data.movie) {
+            return trendData.data.movie.slice(0, 30).map((movie) => ({
               animeId: movie.id,
               title: (movie.title || "").toLowerCase(),
               thumbnail: movie.image_poster || movie.image_cover || "",
