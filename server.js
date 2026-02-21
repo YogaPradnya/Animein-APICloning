@@ -441,13 +441,13 @@ app.get('/docs', (req, res) => {
                     <div class="p-6">
                         <div class="flex items-center gap-3 mb-4">
                             <span class="method-get">GET</span>
-                            <span class="api-url">/animeinweb/schedule</span>
+                            <span class="api-url">/schedule</span>
                             <span class="tag bg-green-500/10 text-green-500">Fast</span>
                         </div>
                         <h4 class="text-xl font-bold mb-2">Jadwal Rilis</h4>
                         <p class="text-slate-400 text-sm mb-6">Jadwal update anime harian dengan info lengkap.</p>
                         
-                        <pre>curl -X GET "http://localhost:3000/api/v1/animeinweb/schedule?day=senin"</pre>
+                        <pre>curl -X GET "http://localhost:3000/api/v1/schedule?day=senin"</pre>
                     </div>
                 </section>
 
@@ -479,8 +479,8 @@ app.get('/docs', (req, res) => {
   `);
 });
 
-// Root endpoint
-app.get('/', (req, res) => {
+// Root & Base API endpoint
+app.get(['/', '/api/v1', '/api/v1/'], (req, res) => {
   // Deteksi protocol dan host secara dinamis
   const protocol = req.headers['x-forwarded-proto'] || req.protocol;
   const host = req.headers.host;
@@ -826,7 +826,7 @@ app.get(['/api/v1/animeinweb/episode', '/api/v1/animeinweb/episode/'], cacheMidd
 }));
 
 // Endpoint untuk schedule anime (jadwal rilis per hari)
-app.get(['/api/v1/animeinweb/schedule', '/api/v1/animeinweb/schedule/'], cacheMiddleware(3600), handleEndpoint(async (req, res) => {
+app.get(['/api/v1/animeinweb/schedule', '/api/v1/animeinweb/schedule/', '/api/v1/schedule', '/api/v1/schedule/'], cacheMiddleware(3600), handleEndpoint(async (req, res) => {
   const { day } = req.query; // Optional: senin, selasa, rabu, kamis, jumat, sabtu, minggu, random
   
   const scheduleData = await scraper.getSchedule(day);
@@ -837,7 +837,7 @@ app.get(['/api/v1/animeinweb/schedule', '/api/v1/animeinweb/schedule/'], cacheMi
 }));
 
 // Endpoint untuk anime trending/popular (sedang hangat) - dengan timeout lebih lama
-app.get(['/api/v1/animeinweb/trending', '/api/v1/animeinweb/trending/'], cacheMiddleware(3600), handleEndpoint(async (req, res) => {
+app.get(['/api/v1/animeinweb/trending', '/api/v1/animeinweb/trending/', '/api/v1/trending', '/api/v1/trending/'], cacheMiddleware(3600), handleEndpoint(async (req, res) => {
   const trendingData = await scraper.getTrending();
   return {
     success: true,
@@ -847,7 +847,7 @@ app.get(['/api/v1/animeinweb/trending', '/api/v1/animeinweb/trending/'], cacheMi
 }, 20000)); // 20 detik timeout
 
 // Endpoint untuk anime baru ditambahkan - dengan timeout lebih lama
-app.get(['/api/v1/animeinweb/new', '/api/v1/animeinweb/new/'], cacheMiddleware(3600), handleEndpoint(async (req, res) => {
+app.get(['/api/v1/animeinweb/new', '/api/v1/animeinweb/new/', '/api/v1/new', '/api/v1/new/'], cacheMiddleware(3600), handleEndpoint(async (req, res) => {
   const newData = await scraper.getNew();
   return {
     success: true,
@@ -857,7 +857,7 @@ app.get(['/api/v1/animeinweb/new', '/api/v1/animeinweb/new/'], cacheMiddleware(3
 }, 20000)); // 20 detik timeout
 
 // Endpoint untuk anime hari ini - dengan timeout lebih lama
-app.get(['/api/v1/animeinweb/today', '/api/v1/animeinweb/today/'], cacheMiddleware(3600), handleEndpoint(async (req, res) => {
+app.get(['/api/v1/animeinweb/today', '/api/v1/animeinweb/today/', '/api/v1/today', '/api/v1/today/'], cacheMiddleware(3600), handleEndpoint(async (req, res) => {
   const todayData = await scraper.getToday();
   return {
     success: true,
@@ -1084,10 +1084,10 @@ if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
     console.log(`   GET /api/v1/episode?url=... - Video episode`);
     console.log(`   GET /api/v1/animeinweb?id=... - Info anime dari animeinweb.com`);
     console.log(`   GET /api/v1/animeinweb/episode?animeId=...&episodeNumber=... - Video episode animeinweb`);
-    console.log(`   GET /api/v1/animeinweb/schedule?day=... - Jadwal anime (day: senin/selasa/rabu/kamis/jumat/sabtu/minggu/random)`);
-    console.log(`   GET /api/v1/animeinweb/trending - Anime sedang hangat/popular`);
-    console.log(`   GET /api/v1/animeinweb/new - Anime baru ditambahkan`);
-    console.log(`   GET /api/v1/animeinweb/today - Anime hari ini`);
+    console.log(`   GET /api/v1/schedule?day=... - Jadwal anime (day: senin/selasa/rabu/kamis/jumat/sabtu/minggu/random)`);
+    console.log(`   GET /api/v1/trending - Anime sedang hangat/popular`);
+    console.log(`   GET /api/v1/new - Anime baru ditambahkan`);
+    console.log(`   GET /api/v1/today - Anime hari ini`);
     console.log(`   GET /api/v1/download/episode?animeId=...&episodeNumber=...&resolution=... - Download link per episode`);
     console.log(`   GET /api/v1/download/batch-info?animeId=... - Info batch download per 25 episode`);
     console.log(`   GET /api/v1/download/batch?animeId=...&resolution=...&startEpisode=...&endEpisode=... - Download link batch\n`);
