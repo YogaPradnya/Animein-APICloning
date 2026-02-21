@@ -841,75 +841,7 @@ app.get(['/api/v1/animeinweb/today', '/api/v1/animeinweb/today/', '/api/v1/today
   };
 }, 20000)); // 20 detik timeout
 
-// [REMOVED] Download episode & batch endpoints dihapus
-// Endpoint untuk get video episode dengan resolusi (dengan dan tanpa trailing slash)
-
-// Endpoint untuk get video episode dengan resolusi (dengan dan tanpa trailing slash)
-app.get('/api/v1/episode', handleEndpoint(async (req, res) => {
-  try {
-    const { url, slug, episode } = req.query;
-    
-    // Bisa pakai url lengkap, slug, atau kombinasi slug + episode
-    let episodeUrl = '';
-    
-    if (url) {
-      episodeUrl = url;
-    } else if (slug && episode) {
-      episodeUrl = `${slug}/episode-${episode}`;
-    } else if (slug) {
-      episodeUrl = slug;
-    } else {
-      return res.status(400).json({
-        success: false,
-        error: 'Parameter url, atau slug+episode diperlukan. Contoh: /api/episode?url=https://... atau /api/episode?slug=one-piece&episode=1'
-      });
-    }
-    
-    const episodeData = await scraper.getEpisodeVideo(episodeUrl);
-    res.json({
-      success: true,
-      data: episodeData
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-}));
-
-app.get('/api/v1/episode/', handleEndpoint(async (req, res) => {
-  try {
-    const { url, slug, episode } = req.query;
-    
-    // Bisa pakai url lengkap, slug, atau kombinasi slug + episode
-    let episodeUrl = '';
-    
-    if (url) {
-      episodeUrl = url;
-    } else if (slug && episode) {
-      episodeUrl = `${slug}/episode-${episode}`;
-    } else if (slug) {
-      episodeUrl = slug;
-    } else {
-      return res.status(400).json({
-        success: false,
-        error: 'Parameter url, atau slug+episode diperlukan. Contoh: /api/episode?url=https://... atau /api/episode?slug=one-piece&episode=1'
-      });
-    }
-    
-    const episodeData = await scraper.getEpisodeVideo(episodeUrl);
-    res.json({
-      success: true,
-      data: episodeData
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-}));
+// [REMOVED] NontonAnimeID (nontonanimeid.boats) endpoints dihapus - semua dari AnimeinWeb
 
 // Start server
 if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
@@ -922,7 +854,7 @@ if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
     console.log(`   GET /api/v1/search?q=...&genre=...&sort=...&page=... - Pencarian dengan filter genre & sorting`);
     console.log(`   GET /api/v1/genres - List genre yang tersedia`);
     console.log(`   GET /api/v1/list?page=1 - List anime`);
-    console.log(`   GET /api/v1/episode?url=... - Video episode`);
+
     console.log(`   GET /api/v1/animeinweb?id=... - Info anime dari animeinweb.com`);
     console.log(`   GET /api/v1/animeinweb/episode?animeId=...&episodeNumber=... - Video episode animeinweb`);
     console.log(`   GET /api/v1/schedule?day=... - Jadwal anime (day: senin/selasa/rabu/kamis/jumat/sabtu/minggu/random)`);

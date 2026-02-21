@@ -1,19 +1,19 @@
 {
-  "testRunAt": "2026-02-21T11:01:55.029Z",
+  "testRunAt": "2026-02-21T11:07:31.891Z",
   "baseUrl": "http://localhost:3001",
   "summary": {
-    "passed": 42,
-    "failed": 1,
-    "total": 43,
-    "avgTime": 4831,
-    "passRate": 98
+    "passed": 41,
+    "failed": 0,
+    "total": 41,
+    "avgTime": 2,
+    "passRate": 100
   },
   "results": [
     {
       "label": "Root",
       "path": "/",
       "status": 200,
-      "duration": 32,
+      "duration": 19,
       "passed": true,
       "summary": "Anime API - NontonAnimeID & AnimeInWeb | online ✓",
       "error": null
@@ -31,7 +31,7 @@
       "label": "Dashboard",
       "path": "/dashboard",
       "status": 200,
-      "duration": 23,
+      "duration": 2,
       "passed": true,
       "summary": "HTML page response - EXPECTED ✓ | HTML dashboard ✓",
       "error": "Invalid JSON response"
@@ -40,7 +40,7 @@
       "label": "Docs",
       "path": "/docs",
       "status": 200,
-      "duration": 3,
+      "duration": 1,
       "passed": true,
       "summary": "HTML page response - EXPECTED ✓ | HTML docs ✓",
       "error": "Invalid JSON response"
@@ -49,7 +49,7 @@
       "label": "Latest Episodes",
       "path": "/api/v1/latest",
       "status": 200,
-      "duration": 13377,
+      "duration": 1,
       "passed": true,
       "summary": "success=true, data=[11 items] | 11 episodes, fields: [title, episode, link]",
       "error": null
@@ -58,7 +58,7 @@
       "label": "Latest (trailing slash)",
       "path": "/api/v1/latest/",
       "status": 200,
-      "duration": 8822,
+      "duration": 1,
       "passed": true,
       "summary": "success=true, data=[11 items]",
       "error": null
@@ -67,16 +67,16 @@
       "label": "Search: keyword \"naruto\"",
       "path": "/api/v1/search?q=naruto",
       "status": 200,
-      "duration": 14962,
+      "duration": 2,
       "passed": true,
-      "summary": "success=true, data=[0 items] | 0 results ditemukan",
+      "summary": "success=true, data=[17 items] | 17 results ditemukan",
       "error": null
     },
     {
       "label": "Search: genre Action (id=14)",
       "path": "/api/v1/search?genre=14&sort=views",
       "status": 200,
-      "duration": 4734,
+      "duration": 4,
       "passed": true,
       "summary": "success=true, data=[60 items] | 60 results, sort=views",
       "error": null
@@ -85,7 +85,7 @@
       "label": "Search: sort=newest",
       "path": "/api/v1/search?sort=newest",
       "status": 200,
-      "duration": 8211,
+      "duration": 3,
       "passed": true,
       "summary": "success=true, data=[60 items]",
       "error": null
@@ -94,7 +94,7 @@
       "label": "Search: keyword+genre+sort",
       "path": "/api/v1/search?q=one+piece&genre=14&sort=favorites",
       "status": 200,
-      "duration": 9251,
+      "duration": 3,
       "passed": true,
       "summary": "success=true, data=[25 items]",
       "error": null
@@ -103,7 +103,7 @@
       "label": "Search: page=1",
       "path": "/api/v1/search?q=sword&page=1",
       "status": 200,
-      "duration": 2757,
+      "duration": 1,
       "passed": true,
       "summary": "success=true, data=[0 items]",
       "error": null
@@ -112,7 +112,7 @@
       "label": "Search: tanpa parameter (default)",
       "path": "/api/v1/search",
       "status": 200,
-      "duration": 7369,
+      "duration": 2,
       "passed": true,
       "summary": "success=true, data=[60 items]",
       "error": null
@@ -121,7 +121,7 @@
       "label": "Get All Genres",
       "path": "/api/v1/genres",
       "status": 200,
-      "duration": 1190,
+      "duration": 1,
       "passed": true,
       "summary": "success=true, data=[33 items] | 33 genres, has id+name: ✓",
       "error": null
@@ -130,7 +130,7 @@
       "label": "Detail: one-piece",
       "path": "/api/v1/detail?slug=one-piece",
       "status": 200,
-      "duration": 28934,
+      "duration": 3,
       "passed": true,
       "summary": "success=true, data={title, alternativeTitle, synopsis...} | fields: [title, synopsis, genres, episodes]",
       "error": null
@@ -139,7 +139,7 @@
       "label": "Detail: naruto",
       "path": "/api/v1/detail?slug=naruto",
       "status": 200,
-      "duration": 28894,
+      "duration": 4,
       "passed": true,
       "summary": "success=true, data={title, alternativeTitle, synopsis...}",
       "error": null
@@ -148,7 +148,7 @@
       "label": "Detail: tanpa slug (expect error)",
       "path": "/api/v1/detail",
       "status": 400,
-      "duration": 4,
+      "duration": 1,
       "passed": true,
       "summary": "400 Bad Request: Parameter slug atau url diperlukan. Contoh: /api/detail?slug",
       "error": null
@@ -157,7 +157,7 @@
       "label": "Anime List page=1",
       "path": "/api/v1/list?page=1",
       "status": 200,
-      "duration": 1762,
+      "duration": 1,
       "passed": true,
       "summary": "success=true, data=[60 items] | 60 anime, page 1",
       "error": null
@@ -166,7 +166,7 @@
       "label": "Anime List page=2",
       "path": "/api/v1/list?page=2",
       "status": 200,
-      "duration": 2459,
+      "duration": 1,
       "passed": true,
       "summary": "success=true, data=[60 items]",
       "error": null
@@ -175,7 +175,7 @@
       "label": "Anime List (default)",
       "path": "/api/v1/list",
       "status": 200,
-      "duration": 1049,
+      "duration": 1,
       "passed": true,
       "summary": "success=true, data=[60 items]",
       "error": null
@@ -184,7 +184,7 @@
       "label": "Schedule: senin",
       "path": "/api/v1/animeinweb/schedule?day=senin",
       "status": 200,
-      "duration": 1218,
+      "duration": 1,
       "passed": true,
       "summary": "success=true, data={currentDay, schedule...} | 7 anime on SEN",
       "error": null
@@ -193,7 +193,7 @@
       "label": "Schedule: selasa",
       "path": "/api/v1/animeinweb/schedule?day=selasa",
       "status": 200,
-      "duration": 1525,
+      "duration": 1,
       "passed": true,
       "summary": "success=true, data={currentDay, schedule...} | 8 anime on SEL",
       "error": null
@@ -202,7 +202,7 @@
       "label": "Schedule: rabu",
       "path": "/api/v1/animeinweb/schedule?day=rabu",
       "status": 200,
-      "duration": 593,
+      "duration": 1,
       "passed": true,
       "summary": "success=true, data={currentDay, schedule...} | 11 anime on RAB",
       "error": null
@@ -211,7 +211,7 @@
       "label": "Schedule: kamis",
       "path": "/api/v1/animeinweb/schedule?day=kamis",
       "status": 200,
-      "duration": 937,
+      "duration": 1,
       "passed": true,
       "summary": "success=true, data={currentDay, schedule...} | 6 anime on KAM",
       "error": null
@@ -220,7 +220,7 @@
       "label": "Schedule: jumat",
       "path": "/api/v1/animeinweb/schedule?day=jumat",
       "status": 200,
-      "duration": 680,
+      "duration": 1,
       "passed": true,
       "summary": "success=true, data={currentDay, schedule...} | 8 anime on JUM",
       "error": null
@@ -229,7 +229,7 @@
       "label": "Schedule: sabtu",
       "path": "/api/v1/animeinweb/schedule?day=sabtu",
       "status": 200,
-      "duration": 868,
+      "duration": 1,
       "passed": true,
       "summary": "success=true, data={currentDay, schedule...} | 11 anime on SAB",
       "error": null
@@ -238,7 +238,7 @@
       "label": "Schedule: minggu",
       "path": "/api/v1/animeinweb/schedule?day=minggu",
       "status": 200,
-      "duration": 188,
+      "duration": 1,
       "passed": true,
       "summary": "success=true, data={currentDay, schedule...} | 26 anime on MIN",
       "error": null
@@ -247,7 +247,7 @@
       "label": "Schedule: random",
       "path": "/api/v1/animeinweb/schedule?day=random",
       "status": 200,
-      "duration": 193,
+      "duration": 2,
       "passed": true,
       "summary": "success=true, data={currentDay, schedule...}",
       "error": null
@@ -265,7 +265,7 @@
       "label": "Schedule: alias /schedule",
       "path": "/api/v1/schedule?day=senin",
       "status": 200,
-      "duration": 190,
+      "duration": 2,
       "passed": true,
       "summary": "success=true, data={currentDay, schedule...}",
       "error": null
@@ -274,7 +274,7 @@
       "label": "Trending (main)",
       "path": "/api/v1/animeinweb/trending",
       "status": 200,
-      "duration": 685,
+      "duration": 1,
       "passed": true,
       "summary": "success=true, data=[30 items] | 30 trending anime",
       "error": null
@@ -283,7 +283,7 @@
       "label": "Trending (alias)",
       "path": "/api/v1/trending",
       "status": 200,
-      "duration": 354,
+      "duration": 1,
       "passed": true,
       "summary": "success=true, data=[30 items]",
       "error": null
@@ -292,7 +292,7 @@
       "label": "New Anime (main)",
       "path": "/api/v1/animeinweb/new",
       "status": 200,
-      "duration": 278,
+      "duration": 1,
       "passed": true,
       "summary": "success=true, data=[11 items] | 11 anime baru",
       "error": null
@@ -301,7 +301,7 @@
       "label": "New Anime (alias)",
       "path": "/api/v1/new",
       "status": 200,
-      "duration": 249,
+      "duration": 1,
       "passed": true,
       "summary": "success=true, data=[11 items]",
       "error": null
@@ -310,7 +310,7 @@
       "label": "Today Anime (main)",
       "path": "/api/v1/animeinweb/today",
       "status": 200,
-      "duration": 344,
+      "duration": 0,
       "passed": true,
       "summary": "success=true, data={day, date, anime...} | obj results",
       "error": null
@@ -319,7 +319,7 @@
       "label": "Today Anime (alias)",
       "path": "/api/v1/today",
       "status": 200,
-      "duration": 211,
+      "duration": 1,
       "passed": true,
       "summary": "success=true, data={day, date, anime...}",
       "error": null
@@ -328,7 +328,7 @@
       "label": "AnimeInWeb: One Piece (id=426)",
       "path": "/api/v1/animeinweb?id=426",
       "status": 200,
-      "duration": 20260,
+      "duration": 4,
       "passed": true,
       "summary": "success=true, data={title, alternativeTitle, synopsis...} | title=\"one piece\", episodes=300",
       "error": null
@@ -337,7 +337,7 @@
       "label": "AnimeInWeb: id=341 (Naruto)",
       "path": "/api/v1/animeinweb?id=341",
       "status": 200,
-      "duration": 5731,
+      "duration": 5,
       "passed": true,
       "summary": "success=true, data={title, alternativeTitle, synopsis...}",
       "error": null
@@ -346,7 +346,7 @@
       "label": "AnimeInWeb: tanpa id (expect error)",
       "path": "/api/v1/animeinweb",
       "status": 400,
-      "duration": 1,
+      "duration": 3,
       "passed": true,
       "summary": "400 Bad Request: Parameter id atau url diperlukan. Contoh: /api/animeinweb?id",
       "error": null
@@ -355,7 +355,7 @@
       "label": "Episode: One Piece ep.500",
       "path": "/api/v1/animeinweb/episode?animeId=426&episodeNumber=500",
       "status": 200,
-      "duration": 5723,
+      "duration": 2,
       "passed": true,
       "summary": "success=true, data={title, episodeNumber, episodeId...} | videoSources=4, title=\"episode 500\"",
       "error": null
@@ -364,7 +364,7 @@
       "label": "Episode: Naruto ep.1",
       "path": "/api/v1/animeinweb/episode?animeId=341&episodeNumber=1",
       "status": 200,
-      "duration": 3655,
+      "duration": 1,
       "passed": true,
       "summary": "success=true, data={title, episodeNumber, episodeId...}",
       "error": null
@@ -376,24 +376,6 @@
       "duration": 1,
       "passed": true,
       "summary": "success=false: Parameter animeId dan episodeNumber diperlukan. Contoh: /api/animeinwe",
-      "error": null
-    },
-    {
-      "label": "Episode: by slug+episode",
-      "path": "/api/v1/episode?slug=one-piece&episode=1",
-      "status": 504,
-      "duration": 30002,
-      "passed": false,
-      "summary": "504 Gateway Timeout [custom check FAILED]",
-      "error": null
-    },
-    {
-      "label": "Episode: tanpa params (expect error)",
-      "path": "/api/v1/episode",
-      "status": 400,
-      "duration": 1,
-      "passed": true,
-      "summary": "400 Bad Request: Parameter url, atau slug+episode diperlukan. Contoh: /api/ep",
       "error": null
     }
   ]

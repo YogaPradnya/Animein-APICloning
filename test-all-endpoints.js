@@ -357,14 +357,7 @@ async function runAllTests() {
     expectSuccess: false
   }));
 
-  // ── 13. EPISODE VIDEO (NontonAnimeID) ─────────────────────
-  printSectionHeader('13. Video Episode - NontonAnimeID (/episode)');
-  allResults.push(await runTest('Episode: by slug+episode', '/api/v1/episode?slug=one-piece&episode=1', {
-    check: d => d.data ? `videoSources=${d.data.videoSources?.length || 0}` : false
-  }));
-  allResults.push(await runTest('Episode: tanpa params (expect error)', '/api/v1/episode', {
-    expectSuccess: false
-  }));
+  // NontonAnimeID endpoint dihapus - semua dari AnimeinWeb
 
   // ── PRINT SUMMARY ─────────────────────────────────────────
   const summary = printSummary(allResults);
