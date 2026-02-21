@@ -146,6 +146,7 @@ async function cfFetch(url, options = {}) {
     extraHeaders = {},
     timeout = 20000,
     returnText = false,
+    returnBuffer = false,
   } = options;
 
   const userAgent = getNextUserAgent();
@@ -207,6 +208,10 @@ async function cfFetch(url, options = {}) {
     if (!response.ok && response.status !== 200) {
       const errText = await response.text().catch(() => '');
       throw new Error(`HTTP ${response.status} for ${url.split('?')[0]}: ${errText.substring(0, 100)}`);
+    }
+
+    if (returnBuffer) {
+      return Buffer.from(await response.arrayBuffer());
     }
 
     if (returnText) {

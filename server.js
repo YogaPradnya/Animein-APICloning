@@ -7,6 +7,7 @@ const morgan = require('morgan');
 const NodeCache = require('node-cache');
 const scraper = require('./api/scraper');
 const path = require('path');
+const { cfFetchWithRetry } = require('./api/cf-fetch');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -100,6 +101,10 @@ const cacheMiddleware = (duration) => {
 // Helper function untuk handle endpoint dengan atau tanpa trailing slash + timeout
 const handleEndpoint = (handler, timeoutMs = 30000) => {
   return async (req, res) => {
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+    const host = req.headers.host;
+    const fullBaseUrl = `${protocol}://${host}`;
+
     const timeout = setTimeout(() => {
       if (!res.headersSent) {
         res.status(504).json({
@@ -110,9 +115,13 @@ const handleEndpoint = (handler, timeoutMs = 30000) => {
     }, timeoutMs);
     
     try {
-      const result = await handler(req, res);
+      let result = await handler(req, res);
       clearTimeout(timeout);
       if (!res.headersSent) {
+        // Automatically proxy image URLs in response
+        if (result && typeof result === 'object') {
+          result = proxyImagesInResponse(result, fullBaseUrl);
+        }
         res.json(result);
       }
     } catch (error) {
@@ -128,6 +137,68 @@ const handleEndpoint = (handler, timeoutMs = 30000) => {
     }
   };
 };
+
+// Helper: Ubah link gambar asli menjadi proxy image
+function proxyImagesInResponse(data, baseUrl) {
+  if (!data) return data;
+  if (Array.isArray(data)) {
+    return data.map(item => proxyImagesInResponse(item, baseUrl));
+  }
+  if (typeof data === 'object') {
+    const newData = {};
+    for (const key in data) {
+      if (typeof data[key] === 'string' && data[key].startsWith('http') && 
+         (key.includes('cover') || key.includes('poster') || key.includes('thumbnail') || key.includes('image') || data[key].match(/\.(jpg|jpeg|png|webp|gif)(\?.*)?$/i))) {
+        if (!data[key].includes('/api/v1/image')) {
+          newData[key] = `${baseUrl}/api/v1/image?url=${encodeURIComponent(data[key])}`;
+        } else {
+          newData[key] = data[key];
+        }
+      } else {
+        newData[key] = proxyImagesInResponse(data[key], baseUrl);
+      }
+    }
+    return newData;
+  }
+  return data;
+}
+
+// Image Proxy Endpoint (Bypass Cloudflare Image Protection)
+app.get('/api/v1/image', async (req, res) => {
+  const imageUrl = req.query.url;
+  if (!imageUrl) {
+    return res.status(400).json({ success: false, error: 'Parameter url diperlukan' });
+  }
+
+  try {
+    const refererDomain = new URL(process.env.ANIMEINWEB_URL || 'https://animeinweb.com').origin;
+    
+    const buffer = await cfFetchWithRetry(imageUrl, {
+      returnBuffer: true,
+      extraHeaders: {
+        'Referer': `${refererDomain}/`,
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'Sec-Fetch-Dest': 'image',
+        'Sec-Fetch-Mode': 'no-cors',
+        'Sec-Fetch-Site': 'cross-site'
+      }
+    }, 2);
+
+    // Deteksi tipe konten dari URL
+    let contentType = 'image/jpeg';
+    if (imageUrl.toLowerCase().endsWith('.png')) contentType = 'image/png';
+    if (imageUrl.toLowerCase().endsWith('.webp')) contentType = 'image/webp';
+    if (imageUrl.toLowerCase().endsWith('.gif')) contentType = 'image/gif';
+
+    res.set('Content-Type', contentType);
+    res.set('Cache-Control', 'public, max-age=31536000, immutable');
+    res.send(buffer);
+  } catch (err) {
+    console.error(`[IMAGE PROXY] Error fetching ${imageUrl}:`, err.message);
+    // Fallback: Redirect ke origin URL jika proxy gagal, biarkan browser menangani sebisa mungkin
+    res.redirect(imageUrl);
+  }
+});
 
 // Dashboard Page
 app.get('/dashboard', (req, res) => {
