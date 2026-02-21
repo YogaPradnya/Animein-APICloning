@@ -34,9 +34,8 @@
 | 9   | `/api/v1/animeinweb/trending` | GET    | 1 jam     | Anime sedang trending                   |
 | 10  | `/api/v1/animeinweb/new`      | GET    | 1 jam     | Anime baru ditambahkan                  |
 | 11  | `/api/v1/animeinweb/today`    | GET    | 1 jam     | Anime update hari ini                   |
-| 12  | `/api/v1/image`               | GET    | 1 tahun   | Proxy Bypass Cloudflare untuk Gambar    |
 
-> 💡 Semua endpoint support **trailing slash** (`/latest` = `/latest/`) dan punya **alias** yang lebih pendek. Semua link gambar di dalam response (cover, thumbnail, poster) secara **otomatis dibungkus oleh endpoint `/api/v1/image`**, sehingga Frontend tidak perlu setup proxy sendiri.
+> 💡 Semua endpoint support **trailing slash** (`/latest` = `/latest/`) dan punya **alias** yang lebih pendek. Semua link gambar di dalam response (cover, thumbnail, poster) secara **otomatis diteruskan melalui proxy `wsrv.nl`**, agar Frontend bebas hambatan 403 Forbidden dari Cloudflare dan tidak perlu repot setup proxy gambar.
 
 ---
 
@@ -495,22 +494,6 @@ curl "http://localhost:3001/api/v1/today"
 
 ---
 
-## 12. 🖼️ Image Proxy (Cloudflare Bypass)
-
-```
-GET /api/v1/image?url={url_asli}
-```
-
-Endpoint ini digunakan untuk membypass proteksi hotlinking Cloudflare milik sumber gambar (403 Forbidden). **Secara otomatis semua endpoint di atas akan mereturn atribut `cover`, `poster`, dan `thumbnail` dalam format link ini**.
-
-```bash
-curl "http://localhost:3000/api/v1/image?url=https%3A%2F%2Fapi.animein.net%2Fassets%2Fimages%2Fmovie%2Fposter%2F3b58031b55ceb0a20b1cb56c20933153.jpg"
-```
-
-**Response:** File Binary `image/jpeg` atau tipe gambar lainnya. Bisa langsung dipasang di `src` tag `<img>` pada Frontend!
-
----
-
 ## ⚠️ Error Codes
 
 | HTTP Code | Kondisi                                                 | Contoh Response                                                       |
@@ -547,8 +530,8 @@ curl "http://localhost:3000/api/v1/image?url=https%3A%2F%2Fapi.animein.net%2Fass
 ### v1.3.0 — 2026-02-22
 
 - 🔐 **Core:** Implementasi `undici` HTTP/2 client + Rotating User Agents + In-Memory Cookie Jar untuk **100% bypass Cloudflare CF-Mitigated**.
-- 🛠️ **Server:** Tambahan Middleware Proxy Image di `server.js` untuk membypass proteksi hotlink gambar (403 Forbidden).
-- 🧹 **Clean up:** Penghapusan file logs dan script test lama yang tidak terpakai.
+- 🖼️ **Images:** Menggunakan auto-proxy CDN gratis `wsrv.nl` secara global untuk membypass proteksi hotlink gambar (403). Endpoint `/api/v1/image` internal dihapus.
+- 🧹 **Clean up:** Penghapusan belasan file dump logs (`*resp.json`, `/logs/`) dan test scripts yang tidak terpakai lagi.
 
 ### v1.2.0 — 2026-02-21
 
