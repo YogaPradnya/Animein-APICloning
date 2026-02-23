@@ -1909,21 +1909,24 @@ async function getAnimeInWebData(animeIdOrUrl) {
     // Parse studios
     const studios = movie.studio ? [movie.studio.toLowerCase()] : [];
 
-    const animeData = {
-      title: (movie.title || "").toLowerCase(),
-      alternativeTitle: (movie.synonyms || "").toLowerCase(),
-      synopsis: (movie.synopsis || "").toLowerCase(),
-      status: (movie.status || "").toLowerCase(),
-      type: (movie.type || "").toLowerCase(),
-      airedStart: (movie.aired_start || "").toLowerCase(),
-      airedEnd: (movie.aired_end || "").toLowerCase(),
-      studios: studios,
-      genres: genres,
-      author: jikanAuthor || "", 
-      rating: jikanRating || "", 
-      cover: movie.image_cover || "",
-      poster: movie.image_poster || "",
-      thumbnail: movie.image_cover || movie.image_poster || "",
+      const imageCover = movie.image_cover ? `https://xyz-api.animein.net${movie.image_cover}` : "";
+      const imagePoster = movie.image_poster ? `https://xyz-api.animein.net${movie.image_poster}` : "";
+      
+      const animeData = {
+        title: (movie.title || "").toLowerCase(),
+        alternativeTitle: (movie.synonyms || "").toLowerCase(),
+        synopsis: (movie.synopsis || "").toLowerCase(),
+        status: (movie.status || "").toLowerCase(),
+        type: (movie.type || "").toLowerCase(),
+        airedStart: (movie.aired_start || "").toLowerCase(),
+        airedEnd: (movie.aired_end || "").toLowerCase(),
+        studios: studios,
+        genres: genres,
+        author: jikanAuthor || "", 
+        rating: jikanRating || "", 
+        cover: imageCover,
+        poster: imagePoster,
+        thumbnail: imageCover || imagePoster || "",
       episodes: episodes,
       currentEpisode: currentEpisode
         ? {
