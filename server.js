@@ -45,6 +45,11 @@ app.use(express.json());
 
 // Middleware: Monitoring
 app.use((req, res, next) => {
+  // Jangan tracking endpoint dashboard itu sendiri
+  if (req.path === '/dashboard' || req.path === '/dashboard/') {
+    return next();
+  }
+
   const start = Date.now();
   stats.totalRequests++;
   
