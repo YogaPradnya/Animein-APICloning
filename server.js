@@ -148,14 +148,31 @@ function proxyImagesInResponse(data) {
   if (typeof data === 'object') {
     const newData = {};
     for (const key in data) {
-      if (typeof data[key] === 'string' && data[key].startsWith('http') && 
+      if (typeof data[key] === 'string' && 
          (key.includes('cover') || key.includes('poster') || key.includes('thumbnail') || key.includes('image') || data[key].match(/\.(jpg|jpeg|png|webp|gif)(\?.*)?$/i))) {
         
-        // Perbaiki double slash jika ada
-        let targetUrl = data[key].replace(/net\/\/assets/g, 'net/assets');
+        let targetUrl = data[key];
         
-        // Gunakan proxy CDN gratis khusus gambar (wsrv.nl) yang lolos filter Cloudflare
-        if (!targetUrl.includes('wsrv.nl')) {
+        // 1. Tangani relative URL
+        if (targetUrl.startsWith('/')) {
+          targetUrl = `https://xyz-api.animein.net${targetUrl}`;
+        }
+        
+        // 2. Perbaiki double hostname (e.g. https://xyz...https://api...)
+        if (targetUrl.includes('http') && targetUrl.lastIndexOf('http') > 0) {
+          const lastHttp = targetUrl.lastIndexOf('http');
+          targetUrl = targetUrl.substring(lastHttp);
+          // Tambahkan prefix hostname yang diinginkan jika URL hasil extract tidak punya hostname yang benar
+          if (!targetUrl.includes('xyz-api.animein.net') && targetUrl.includes('api.animein.net')) {
+             targetUrl = targetUrl.replace('api.animein.net', 'xyz-api.animein.net');
+          }
+        }
+
+        // 3. Perbaiki double slash jika ada (e.g. .net//assets)
+        targetUrl = targetUrl.replace(/net\/\/assets/g, 'net/assets');
+        
+        // 4. Gunakan proxy CDN gratis khusus gambar (wsrv.nl) yang lolos filter Cloudflare
+        if (targetUrl.startsWith('http') && !targetUrl.includes('wsrv.nl')) {
           newData[key] = `https://wsrv.nl/?url=${encodeURIComponent(targetUrl)}`;
         } else {
           newData[key] = targetUrl;

@@ -43,13 +43,31 @@ function getDynamicHeaders() {
     return headers;
 }
 
+// Global var to track last prime time
+let lastPrimeTime = 0;
+
+// Helper to prime session and get Cloudflare cookies via a less protected endpoint (schedule)
+async function primeSession() {
+  const now = Date.now();
+  if (now - lastPrimeTime < 60000) return; // prime at most once per minute
+  
+  try {
+     console.log("🛠️ [Session] Priming session to bypass CF...");
+     const scheduleUrl = `${ANIMEINWEB_URL}/api/proxy/3/2/schedule/data?day=senin`;
+     await cfFetchWithRetry(scheduleUrl, { timeout: 10000 }, 1);
+     lastPrimeTime = Date.now();
+     console.log("🍪 [Session] Session priming successful!");
+  } catch (err) {
+     console.log("⚠️ [Session] Priming failed, continuing anyway:", err.message);
+  }
+}
+
 // Helper untuk update cookie dari response headers (axios fallback)
 function updateCookies(response) {
     if (response && response.headers) {
         const setCookie = response.headers['set-cookie'];
         if (setCookie) {
             const newCookies = setCookie.map(c => c.split(';')[0]).join('; ');
-            console.log("🍪 Session Cookie Refreshed!");
             globalCookies = newCookies;
         }
     }
@@ -62,6 +80,7 @@ function updateCookies(response) {
  * @param {number} [timeout=20000]
  */
 async function animeinwebFetch(apiUrl, timeout = 20000) {
+  await primeSession(); // prime session before fetching
   try {
     // Prioritas 1: undici (HTTP/2, rotating UA, cookie jar)
     const data = await cfFetchWithRetry(apiUrl, { timeout }, 2);
@@ -1909,8 +1928,8 @@ async function getAnimeInWebData(animeIdOrUrl) {
     // Parse studios
     const studios = movie.studio ? [movie.studio.toLowerCase()] : [];
 
-      const imageCover = movie.image_cover ? `https://xyz-api.animein.net${movie.image_cover}` : "";
-      const imagePoster = movie.image_poster ? `https://xyz-api.animein.net${movie.image_poster}` : "";
+      const imageCover = movie.image_cover ? (movie.image_cover.startsWith('http') ? movie.image_cover : `https://xyz-api.animein.net${movie.image_cover}`) : "";
+      const imagePoster = movie.image_poster ? (movie.image_poster.startsWith('http') ? movie.image_poster : `https://xyz-api.animein.net${movie.image_poster}`) : "";
       
       const animeData = {
         title: (movie.title || "").toLowerCase(),
