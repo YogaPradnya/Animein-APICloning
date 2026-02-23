@@ -2000,7 +2000,8 @@ async function getAnimeInWebEpisode(animeId, episodeNumber) {
         const batchPromises = Array.from({ length: batchSize }).map((_, i) => {
           const p = batchStart + i;
           const url = `${ANIMEINWEB_URL}/api/proxy/3/2/movie/episode/${animeId}?page=${p}`;
-          return animeinwebFetch(url, 7000).catch(async (e) => {
+          // Reduce timeout for individual pages to 4000ms to fail faster if blocked
+          return animeinwebFetch(url, 4000).catch(async (e) => {
             if (!process.env.VERCEL) {
               try { return await fetchApiWithBrowser(url); } catch(err) { return null; }
             }
@@ -2010,42 +2011,57 @@ async function getAnimeInWebEpisode(animeId, episodeNumber) {
 
         const batchResults = await Promise.all(batchPromises);
         let shouldStopSearch = false; // Jika kita mencapai ujung / page kosong
+        let validDataCount = 0;
 
         for (const episodeListData of batchResults) {
-          if (episodeListData && episodeListData.data && episodeListData.data.episode && episodeListData.data.episode.length > 0) {
-            // Cari episode dengan nomor yang sesuai
-            const targetEpisode = episodeListData.data.episode.find(
-              (ep) =>
-                ep.index === episodeNumber.toString() ||
-                ep.index === parseInt(episodeNumber).toString(),
-            );
+          if (episodeListData && episodeListData.data) {
+            validDataCount++;
+            
+            if (episodeListData.data.episode && episodeListData.data.episode.length > 0) {
+              // Cari episode dengan nomor yang sesuai
+              const targetEpisode = episodeListData.data.episode.find(
+                (ep) =>
+                  ep.index === episodeNumber.toString() ||
+                  ep.index === parseInt(episodeNumber).toString(),
+              );
 
-            if (targetEpisode) {
-              episodeId = targetEpisode.id;
-              episodeInfo = targetEpisode;
-              foundEpisode = true;
-              console.log(`✅ Found episode ID ${episodeId} (FAST PARALLEL!)`);
-              break;
-            }
+              if (targetEpisode) {
+                episodeId = targetEpisode.id;
+                episodeInfo = targetEpisode;
+                foundEpisode = true;
+                console.log(`✅ Found episode ID ${episodeId} (FAST PARALLEL!)`);
+                break;
+              }
 
-            // Jika ada array dengan size < 30, kemungkinan besar itu page teterakhir, jadi kita bisa stop search batch selanjutnya
-            if (episodeListData.data.episode.length < 30) {
+              // Jika ada array dengan size < 30, kemungkinan besar itu page terakhir
+              if (episodeListData.data.episode.length < 30) {
+                shouldStopSearch = true;
+              }
+            } else {
+              // Jika endpoint merespon tapi episode array kosong, kemungkinan page habis
               shouldStopSearch = true;
             }
           }
         }
 
+        // Kalau semua fetch dalam batch ini error/null (misal kena CF block 403), stop daripada brute force ngabisin waktu
+        if (validDataCount === 0) {
+           console.log("⚠️ All API requests in this batch failed or returned empty. Stopping search to prevent timeout.");
+           shouldStopSearch = true;
+        }
+
         if (foundEpisode || shouldStopSearch) break;
       }
     } catch (apiError) {
-      console.log(
-        "Episode list API failed, falling back to Playwright...",
-        apiError.message,
-      );
+      console.log("Episode list API failed:", apiError.message);
     }
 
     // Fallback ke Playwright jika episode ID tidak ditemukan dari API
     if (!episodeId) {
+      if (process.env.VERCEL) {
+         throw new Error(`[Vercel] Episode ID tidak ditemukan secara API. Playwright fallback dinonaktifkan di Vercel.`);
+      }
+      
       console.log("Using Playwright fallback...");
       const browser = await chromium.launch({ headless: true });
       const page = await browser.newPage();
